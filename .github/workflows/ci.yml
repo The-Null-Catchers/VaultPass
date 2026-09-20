@@ -82,7 +82,7 @@ jobs:
         run: |
           flutter build apk --debug --dart-define=API_URL="$API_URL"
           flutter build appbundle --release --dart-define=API_URL="$API_URL"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: VaultPass-Android-test-builds
           path: |
