@@ -1,0 +1,11 @@
+# Synchronization protocol
+
+`GET /vaults` returns authorized personal vault key wrappers. `GET /vaults/{id}/sync?after=N` returns up to 500 latest item states, a cursor and `has_more`. Sync and writes lock the vault row to avoid publishing a cursor before an earlier transaction commits. The cursor is a per-vault sequence, independent of clocks. Each update increments both item version and vault sequence. Do not use timestamps to resolve conflicts.
+
+`PUT /vaults/{id}/items/{id}` sends `{expected_version, payload, deleted}`. Encrypt using AAD for `expected_version + 1`. A missing item requires expected version 0. Stale writes return 409 without altering either copy. Repeating exactly the already accepted envelope at the immediately next version is idempotent, allowing a client to recover from a lost response. Re-encrypting the same plaintext produces a new nonce and is not an identical retry.
+
+Mobile writes encrypted pending operations before considering an edit saved. Repeated offline edits to one item keep their original base revision and replace the pending encrypted payload. The client uploads pending operations before fetching remote pages. On conflict it preserves the queue; the user can save the first conflicting local item as a new UUID copy, then fetch remote state. No silent last-write-wins. A process crash between preserving a copy and dropping the old queue entry can produce an extra copy, which is preferable to losing the secret.
+
+Web starts with a full paginated pull and decrypts only in memory. No plaintext server search/index exists. Mobile maintains an encrypted full cache and pending queue. Mobile lock does not discard unsent encrypted edits. Logout refuses while there are pending edits.
+
+Trash marks an item deleted while retaining encrypted history. Permanent deletion empties ciphertext, removes revisions and keeps a purged tombstone so older devices learn the deletion. Purged UUIDs cannot be resurrected. History retains the latest 20 old ciphertext versions. Automatic trash expiry is not yet enabled; deletion remains explicit. Tombstone garbage collection needs device-checkpoint policy before it can safely be added.

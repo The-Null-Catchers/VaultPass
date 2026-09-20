@@ -1,0 +1,16 @@
+# Deployment
+
+Production deployment is gated on [release readiness](RELEASE_READINESS.md). These instructions describe deployment of the current pre-release build for controlled testing, not authorization to store real secrets.
+
+1. Provision a Linux host with Docker/Compose, a domain and valid TLS certificate. Do not expose plain HTTP except an HTTPS redirect.
+2. Clone the repository at a reviewed commit. Copy `.env.example` to `.env`; generate a new PostgreSQL password, set DATABASE_URL consistently, set ENVIRONMENT=production, ALLOWED_ORIGINS to the exact HTTPS origin, PUBLIC_WEB_URL, and real SMTP settings. SMTP uses STARTTLS in production. Keep `.env` private and outside git.
+3. Build: `docker compose build`. Apply migrations using `docker compose run --rm migrate`. Never use `create_all` or manual SQL changes on a deployment.
+4. Start: `docker compose up -d`. Terminate TLS at a reverse proxy based on `deploy/nginx.conf`, forwarding to loopback port 3000. Web `/api` forwards internally to the API. Restrict API loopback port 8000, PostgreSQL, Redis and mail UI to trusted local/operator access. Remove Mailpit from any production override.
+5. Put per-client IP request limits at the trusted edge. The API intentionally ignores untrusted X-Forwarded-For; behind the web proxy its IP limiter sees the proxy. Do not blindly enable forwarded-header trust. Configure trusted proxy networks and an edge limiter before multi-user production use.
+6. Use managed Redis/PostgreSQL authentication/network isolation for larger deployments. Redis contains rate state and short-lived account mail jobs. Encrypt database/backups at rest for metadata protection. Vault ciphertext encryption does not protect emails/session metadata.
+7. Check `/health`, `/docs`, registration, verification email, two-device sync and logout/revocation. Monitor status/latency only; do not enable body/authorization/request-dump logging. Avoid logging email verification tokens.
+8. Back up PostgreSQL with encrypted operator backups; run a restoration drill. Encrypted client backup restore requires the password valid at export. Define metadata and backup retention/deletion policies.
+9. Set GitHub repository variable `VAULTPASS_API_URL=https://your-domain/api`; run the CI workflow for Android test artifacts. Release builds require HTTPS. A production AAB must be signed by your external Play signing pipeline. iOS additionally requires Apple signing/team identifiers and device Keychain checks.
+10. For updates: pull a reviewed commit, back up, build images, run migrations, then restart. Follow a tested rollback plan; rolling code back does not safely imply downgrading a populated database.
+
+No infrastructure or public domain was deployed by this repository initialization. No SMTP credentials, signing keys, R2 bucket or production database was created.

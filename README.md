@@ -150,4 +150,3 @@ Import [the fake JSON template](docs/import-template.json) from web Settings. Ev
 ## Security reporting
 
 See [SECURITY.md](SECURITY.md). A compromised web delivery server or endpoint can steal secrets after unlock; zero-knowledge database storage cannot prevent malicious JavaScript delivery, OS malware, clipboard observers, or a recipient retaining a shared copy.
-

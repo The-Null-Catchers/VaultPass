@@ -1,0 +1,14 @@
+[
+  {
+    "title": "FAKE DEMO — example.com",
+    "type": "login",
+    "username": "demo@example.com",
+    "password": "FAKE-DEMO-ONLY-DO-NOT-USE",
+    "url": "https://example.com",
+    "notes": "This is synthetic portfolio data, never a real credential.",
+    "tags": "demo,example",
+    "folder": "Demo",
+    "favorite": true,
+    "totp": ""
+  }
+]
