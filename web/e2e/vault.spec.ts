@@ -9,7 +9,8 @@ test("register, encrypt, relogin, decrypt, edit and sync another session",async(
  await expect(page.getByRole("heading",{name:"Fake demo login",exact:true})).toBeVisible();
  expect(requests.join("")).not.toContain(master);expect(requests.join("")).not.toContain(secret);expect(requests.join("")).not.toContain("Fake demo login");
  await page.getByRole("button",{name:"Lock vault",exact:true}).last().click();await expect(page.getByRole("button",{name:"Unlock vault",exact:true})).toBeVisible();
- await page.getByLabel("Email address").fill(email);await page.getByLabel("Master password",{exact:true}).fill(master);await page.getByRole("button",{name:"Unlock vault",exact:true}).click();
+ await page.getByLabel("Email address").fill(email);await page.getByLabel("Master password",{exact:true}).fill(master);const freshSync=page.waitForResponse(r=>r.url().includes("/sync?after=0"));await page.getByRole("button",{name:"Unlock vault",exact:true}).click();
+ const syncBody=await (await freshSync).json() as {items:unknown[]};expect(syncBody.items,"fresh session must receive the encrypted item").toHaveLength(1);
  const allItems=page.getByRole("heading",{name:"All items",exact:true}),authError=page.getByRole("alert");const reloginError=await Promise.race([allItems.waitFor({timeout:30000}).then(()=>null),authError.waitFor({timeout:30000}).then(()=>authError.textContent())]);if(reloginError)throw new Error(`Relogin failed: ${reloginError}`);
  await expect(page.getByText("Fake demo login",{exact:true})).toBeVisible({timeout:15000});
  await page.getByText("Fake demo login",{exact:true}).click();await page.getByRole("button",{name:"Toggle password visibility"}).click();await expect(page.getByText(secret,{exact:true})).toBeVisible();
