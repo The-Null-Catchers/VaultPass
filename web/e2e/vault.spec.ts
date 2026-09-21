@@ -10,7 +10,9 @@ test("register, encrypt, relogin, decrypt, edit and sync another session",async(
  expect(requests.join("")).not.toContain(master);expect(requests.join("")).not.toContain(secret);expect(requests.join("")).not.toContain("Fake demo login");
  await page.getByRole("button",{name:"Lock vault",exact:true}).last().click();await expect(page.getByRole("button",{name:"Unlock vault",exact:true})).toBeVisible();
  await page.getByLabel("Email address").fill(email);await page.getByLabel("Master password",{exact:true}).fill(master);await page.getByRole("button",{name:"Unlock vault",exact:true}).click();
- await page.getByRole("button",{name:/Fake demo login/}).click();await page.getByRole("button",{name:"Toggle password visibility"}).click();await expect(page.getByText(secret,{exact:true})).toBeVisible();
+ await expect(page.getByRole("heading",{name:"All items",exact:true})).toBeVisible({timeout:15000});
+ await expect(page.getByText("Fake demo login",{exact:true})).toBeVisible({timeout:15000});
+ await page.getByText("Fake demo login",{exact:true}).click();await page.getByRole("button",{name:"Toggle password visibility"}).click();await expect(page.getByText(secret,{exact:true})).toBeVisible();
  await page.getByRole("button",{name:"Edit item",exact:true}).click();await page.getByLabel("Title",{exact:true}).fill("Edited fake login");await page.getByRole("button",{name:"Save encrypted item",exact:true}).click();await expect(page.getByRole("heading",{name:"Edited fake login"})).toBeVisible();
  const context=await browser.newContext();const other=await context.newPage();await other.goto("/");await other.getByLabel("Email address").fill(email);await other.getByLabel("Master password",{exact:true}).fill(master);await other.getByRole("button",{name:"Unlock vault",exact:true}).click();await expect(other.getByRole("button",{name:/Edited fake login/})).toBeVisible();await other.getByRole("button",{name:/Edited fake login/}).click();await other.getByRole("button",{name:"Toggle password visibility"}).click();await expect(other.getByText(secret,{exact:true})).toBeVisible();
  await context.close();
