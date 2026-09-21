@@ -7,7 +7,7 @@ A privacy-focused password and secrets workspace with a Next.js web client, Flut
 ## Implemented
 
 - Client-side Argon2id, separated HKDF authentication/wrapping keys, random account/vault keys, AES-256-GCM envelopes with contextual authentication.
-- Registration, login, rotating refresh tokens with replay revocation, session/device revocation, email verification, password change, account deletion.
+- Registration, login, rotating refresh tokens with replay revocation, session/device revocation, email verification, password change, optional zero-knowledge recovery key, account deletion.
 - Login, note, card, identity, API credential, recovery-code and developer-secret records. Specialized fields currently use encrypted notes/custom text.
 - Local search, folders/tags, favorites, trash, encrypted revision history, explicit conflict rejection, idempotent retries, paginated sync.
 - Password generation, local short/reused-password checks, RFC 6238 TOTP, opt-in k-anonymity breach checking.

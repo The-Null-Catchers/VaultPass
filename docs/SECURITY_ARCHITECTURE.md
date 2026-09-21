@@ -12,6 +12,7 @@ flowchart TD
     HKDF --> Auth["Authentication secret"]
     HKDF --> Wrap["Account wrapping key"]
     Wrap --> Account["Random 256-bit account key"]
+    Recovery["Random 256-bit recovery key: client only"] --> Account
     Account --> Vault["Random 256-bit vault key"]
     Vault --> Item["AES-256-GCM encrypted item"]
     Item --> Sync["Ciphertext sync service"]
@@ -36,6 +37,7 @@ Authenticated data is exact UTF-8:
 | Item revision | `vaultpass:v1:item:<vault UUID>:<item UUID>:<revision>` |
 | Sharing private key | `vaultpass:v1:sharing-private:<user UUID>` |
 | Shared snapshot | `vaultpass:v1:share:<share UUID>:<sender UUID>:<recipient UUID>` |
+| Recovery-wrapped account key | `vaultpass:v1:recovery:<SHA-256 recovery context>` |
 
 UUIDs use lower-case canonical representation; revisions are base-10 integers. Binding revision and object context prevents moving a ciphertext to another item/vault/revision. Full history rollback by a malicious server remains possible without external trusted checkpoints. Random GCM nonces have a nonzero collision probability; key rotation and per-key usage limits remain release-hardening work. Do not use one vault key for unbounded bulk encryption.
 
@@ -63,13 +65,17 @@ Revocation removes future ciphertext/key downloads and does not erase already sa
 
 ### TOTP and breach checks
 
-Vault TOTP seeds are encrypted item fields; the backend never verifies or receives those seeds in plaintext. This is **not account MFA**. RFC 6238 SHA-1/30-second/6-digit codes are generated locally. Web official test vectors cover 8-digit RFC examples. Login MFA remains unimplemented.
+Vault TOTP seeds are encrypted item fields; the backend never verifies or receives those seeds in plaintext. This is **not account MFA**. RFC 6238 SHA-1/30-second/6-digit codes are generated locally. Web official test vectors cover 8-digit RFC examples. Login MFA remains unimplemented. Server-validated TOTP MFA was deliberately not added because it would require a server-readable shared seed and violate the stated TOTP-secret boundary; WebAuthn/passkeys are the intended account-MFA design.
 
 Breach checking requires explicit consent per check. The client sends 5 hexadecimal characters of a SHA-1 hash (20 bits), its network IP and ordinary request headers to `api.pwnedpasswords.com`, requests padding, and matches remaining suffixes locally. No full password/hash is uploaded. SHA-1 here is only for the published lookup protocol, not password storage. See [HIBP documentation](https://haveibeenpwned.com/API/v3#PwnedPasswords).
 
 ### Recovery and backups
 
-There is no server-side master-password recovery. Encrypted backups contain account bundle, wrapped vault key, and item ciphertext; the original master password is required to restore. Restore decrypts locally and encrypts new copies under the destination vault. Trash is excluded from restore in v1. Losing both the master password and a previously enabled device unlock means losing the vault. Recovery-key enrollment/rotation and authentication reset are not implemented. No recovery UI pretends to bypass this limitation.
+There is no server-side master-password recovery. A user may explicitly enroll a client-generated 256-bit recovery key. HKDF-SHA256 separates `recovery-wrap` and `recovery-auth` material. The wrap key encrypts the existing account key locally using AES-GCM; only that envelope and an Argon2id hash of the independent authentication proof reach the server. The displayed `VP1-<64 hex>` recovery key is never transmitted or stored by VaultPass.
+
+Recovery lookup always returns the deterministic SHA-256 context for the supplied normalized email and a syntactically valid envelope, including for unknown or unenrolled accounts. Successful local decryption produces the recovery proof. After proof verification the API issues a single five-minute reset token and reveals the user UUID needed to bind a newly wrapped account bundle. Completion atomically replaces authentication material, revokes all sessions, deletes the recovery enrollment, and consumes the reset token. The same account key continues to unlock existing vault keys, so items are not re-encrypted. The user must enroll and save a new recovery key afterward. Possession of a recovery key is equivalent to the ability to reset authentication and decrypt the vault; copied keys cannot be remotely revoked until the enrollment is disabled or consumed.
+
+Encrypted backups contain the account bundle, wrapped vault key, and item ciphertext; the original backup master password is required to restore. Restore decrypts locally and encrypts new copies under the destination vault. Trash is excluded from restore in v1. Losing the master password, recovery key, and previously enabled device unlock means losing the vault.
 
 ## Libraries and review
 

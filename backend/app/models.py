@@ -107,6 +107,27 @@ class Verification(Base):
     expires: Mapped[int]
 
 
+class RecoveryKey(Base):
+    __tablename__ = "recovery_keys"
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    auth_hash: Mapped[str] = mapped_column(String(256))
+    account_key: Mapped[dict[str, Any]] = mapped_column(JSON)
+    version: Mapped[uuid.UUID] = mapped_column(Uuid, default=uid)
+    created: Mapped[int] = mapped_column(default=now)
+
+
+class RecoveryAttempt(Base):
+    __tablename__ = "recovery_attempts"
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    recovery_version: Mapped[uuid.UUID] = mapped_column(Uuid)
+    expires: Mapped[int]
+
+
 class SharingKey(Base):
     __tablename__ = "sharing_keys"
     user_id: Mapped[uuid.UUID] = mapped_column(

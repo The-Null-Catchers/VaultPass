@@ -109,6 +109,76 @@ def test_password_change_revokes_sessions_and_preserves_vault(client):
     )
 
 
+def test_recovery_key_is_one_time_and_revokes_sessions(client):
+    body, _, auth = register(client)
+    recovery = {
+        "current_auth_secret": "a" * 64,
+        "recovery_auth_secret": "e" * 64,
+        "account_key": envelope(),
+    }
+    assert client.post("/account/recovery", json=recovery, headers=auth).status_code == 201
+    status = client.get("/account/recovery", headers=auth).json()
+    assert status["enabled"] is True and len(status["context"]) == 64
+    assert client.post("/account/recovery", json=recovery, headers=auth).status_code == 409
+    lookup = client.post("/auth/recovery/lookup", json={"email": body["email"]})
+    assert lookup.status_code == 200
+    assert lookup.json() == {"context": status["context"], "account_key": recovery["account_key"]}
+    new_bundle = {**body["bundle"], "salt": "c" * 32}
+    verify = {"email": body["email"], "recovery_auth_secret": "e" * 64}
+    assert (
+        client.post(
+            "/auth/recovery/verify", json={**verify, "recovery_auth_secret": "f" * 64}
+        ).status_code
+        == 401
+    )
+    challenge = client.post("/auth/recovery/verify", json=verify)
+    assert challenge.status_code == 200 and challenge.json()["user_id"] == body["id"]
+    stale = {
+        "token": challenge.json()["token"],
+        "auth_secret": "d" * 64,
+        "bundle": new_bundle,
+    }
+    assert (
+        client.request(
+            "DELETE", "/account/recovery", headers=auth, json={"auth_secret": "a" * 64}
+        ).status_code
+        == 200
+    )
+    assert client.post("/account/recovery", json=recovery, headers=auth).status_code == 201
+    assert client.post("/auth/recovery/complete", json=stale).status_code == 401
+    challenge = client.post("/auth/recovery/verify", json=verify)
+    assert challenge.status_code == 200
+    complete = {
+        "token": challenge.json()["token"],
+        "auth_secret": "d" * 64,
+        "bundle": new_bundle,
+    }
+    result = client.post("/auth/recovery/complete", json=complete)
+    assert result.status_code == 200 and result.json()["recovery_key_consumed"] is True
+    assert client.get("/vaults", headers=auth).status_code == 401
+    assert (
+        client.post(
+            "/auth/login", json={"email": body["email"], "auth_secret": "a" * 64}
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/auth/login", json={"email": body["email"], "auth_secret": "d" * 64}
+        ).status_code
+        == 200
+    )
+    assert client.post("/auth/recovery/complete", json=complete).status_code == 401
+    fake = client.post("/auth/recovery/lookup", json={"email": "missing@example.com"}).json()
+    assert set(fake) == {"context", "account_key"} and len(fake["context"]) == 64
+    assert (
+        fake["context"]
+        == client.post("/auth/recovery/lookup", json={"email": "missing@example.com"}).json()[
+            "context"
+        ]
+    )
+
+
 def test_plaintext_extra_fields_rejected_and_not_reflected(client):
     body, _, auth = register(client)
     secret = "NEVER_REFLECT_THIS_SECRET"

@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import secrets
 import uuid
 from typing import Annotated
@@ -19,6 +21,8 @@ from .models import (
     Audit,
     DeviceSession,
     Item,
+    RecoveryAttempt,
+    RecoveryKey,
     RefreshToken,
     Revision,
     User,
@@ -82,6 +86,15 @@ def check_secret(user: User | None, secret: str):
         raise HTTPException(401, "Invalid credentials") from exc
     if user is None:
         raise HTTPException(401, "Invalid credentials")
+
+
+def check_hash(encoded: str | None, secret: str, detail: str = "Invalid credentials"):
+    try:
+        ph.verify(encoded or DUMMY_HASH, secret)
+    except VerifyMismatchError as exc:
+        raise HTTPException(401, detail) from exc
+    if encoded is None:
+        raise HTTPException(401, detail)
 
 
 def issue(db: Session, user: User, name: str):
@@ -248,6 +261,118 @@ def request_verification(db: DB, device: Auth):
         argsrepr="[redacted]",
     )
     return {"ok": True}
+
+
+@app.get("/account/recovery")
+def recovery_status(db: DB, device: Auth):
+    user = db.get(User, device.user_id)
+    assert user
+    return {
+        "enabled": db.get(RecoveryKey, device.user_id) is not None,
+        "context": recovery_context(user.email),
+    }
+
+
+@app.post("/account/recovery", dependencies=[Depends(rate_limit)], status_code=201)
+def enroll_recovery(body: s.RecoveryEnroll, db: DB, device: Auth):
+    user = db.get(User, device.user_id)
+    check_secret(user, body.current_auth_secret)
+    assert user
+    if db.get(RecoveryKey, user.id):
+        raise HTTPException(409, "Disable the existing recovery key before replacing it")
+    db.add(
+        RecoveryKey(
+            user_id=user.id,
+            auth_hash=ph.hash(body.recovery_auth_secret),
+            account_key=body.account_key.model_dump(),
+        )
+    )
+    audit(db, user.id, "recovery_key_enabled")
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/account/recovery", dependencies=[Depends(rate_limit)])
+def disable_recovery(body: s.Confirm, db: DB, device: Auth):
+    user = db.get(User, device.user_id)
+    check_secret(user, body.auth_secret)
+    assert user
+    row = db.get(RecoveryKey, user.id)
+    if row:
+        db.execute(delete(RecoveryAttempt).where(RecoveryAttempt.user_id == user.id))
+        db.delete(row)
+        audit(db, user.id, "recovery_key_disabled")
+        db.commit()
+    return {"ok": True}
+
+
+def fake_envelope():
+    return {
+        "v": 1,
+        "nonce": base64.b64encode(secrets.token_bytes(12)).decode(),
+        "ciphertext": base64.b64encode(secrets.token_bytes(48)).decode(),
+    }
+
+
+def recovery_context(email: str):
+    # Public deterministic AAD; identical behavior for enrolled and unknown addresses.
+    return hashlib.sha256(f"vaultpass:v1:recovery-context:{email.lower()}".encode()).hexdigest()
+
+
+@app.post("/auth/recovery/lookup", dependencies=[Depends(rate_limit)])
+def recovery_lookup(body: s.RecoveryLookup, db: DB):
+    email = str(body.email).lower()
+    user = db.scalar(select(User).where(User.email == email))
+    row = db.get(RecoveryKey, user.id) if user else None
+    # Always return a syntactically valid bundle so this endpoint does not disclose enrollment.
+    return {
+        "context": recovery_context(email),
+        "account_key": row.account_key if row else fake_envelope(),
+    }
+
+
+@app.post("/auth/recovery/verify", dependencies=[Depends(rate_limit)])
+def recovery_verify(body: s.RecoveryVerify, db: DB):
+    user = db.scalar(select(User).where(User.email == str(body.email).lower()).with_for_update())
+    row = db.get(RecoveryKey, user.id) if user else None
+    check_hash(row.auth_hash if row else None, body.recovery_auth_secret, "Invalid recovery key")
+    assert user and row
+    code = token()
+    db.execute(delete(RecoveryAttempt).where(RecoveryAttempt.user_id == user.id))
+    db.add(
+        RecoveryAttempt(
+            digest=digest(code),
+            user_id=user.id,
+            recovery_version=row.version,
+            expires=now() + 300,
+        )
+    )
+    audit(db, user.id, "recovery_key_verified")
+    db.commit()
+    return {"token": code, "user_id": str(user.id), "expires_in": 300}
+
+
+@app.post("/auth/recovery/complete", dependencies=[Depends(rate_limit)])
+def recovery_complete(body: s.RecoveryComplete, db: DB):
+    attempt = db.scalar(
+        select(RecoveryAttempt)
+        .where(RecoveryAttempt.digest == digest(body.token))
+        .with_for_update()
+    )
+    if attempt is None or attempt.expires <= now():
+        raise HTTPException(401, "Invalid or expired recovery attempt")
+    user = db.get(User, attempt.user_id)
+    row = db.get(RecoveryKey, attempt.user_id)
+    if user is None or row is None or row.version != attempt.recovery_version:
+        raise HTTPException(401, "Invalid or expired recovery attempt")
+    user.auth_hash, user.bundle = ph.hash(body.auth_secret), body.bundle.model_dump()
+    for device in db.scalars(select(DeviceSession).where(DeviceSession.user_id == user.id)):
+        device.revoked = True
+    db.delete(attempt)
+    db.delete(row)  # Recovery proof is one-time; enrollment must be repeated after use.
+    audit(db, user.id, "account_recovered")
+    db.commit()
+    return {"ok": True, "login_required": True, "recovery_key_consumed": True}
 
 
 @app.post("/auth/verify", dependencies=[Depends(rate_limit)])

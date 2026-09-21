@@ -74,6 +74,27 @@ class Confirm(Strict):
     auth_secret: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class RecoveryEnroll(Strict):
+    current_auth_secret: str = Field(pattern=r"^[0-9a-f]{64}$")
+    recovery_auth_secret: str = Field(pattern=r"^[0-9a-f]{64}$")
+    account_key: Envelope
+
+
+class RecoveryLookup(Strict):
+    email: EmailStr
+
+
+class RecoveryVerify(Strict):
+    email: EmailStr
+    recovery_auth_secret: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class RecoveryComplete(Strict):
+    token: str = Field(min_length=40, max_length=128)
+    auth_secret: str = Field(pattern=r"^[0-9a-f]{64}$")
+    bundle: Bundle
+
+
 class Verify(Strict):
     token: str = Field(min_length=40, max_length=128)
 

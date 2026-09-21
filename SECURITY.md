@@ -6,6 +6,6 @@ Please report vulnerabilities through GitHub private vulnerability reporting on 
 
 Reports should include affected commit, minimal synthetic reproduction, expected/actual behavior, impact and relevant environment. Allow coordinated remediation before public disclosure. Never test against another person's vault or production account without permission.
 
-The server stores client ciphertext and authentication/session metadata. Argon2id derives separated wrapping/authentication material; random account/vault keys are wrapped with AES-256-GCM. Sharing uses recipient RSA-OAEP key wrapping. See [architecture](docs/SECURITY_ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [known limitations](docs/RELEASE_READINESS.md).
+The server stores client ciphertext and authentication/session metadata. Argon2id derives separated wrapping/authentication material; random account/vault keys are wrapped with AES-256-GCM. Optional recovery uses a client-generated 256-bit key, separated wrap/authentication material, and a one-time five-minute reset token. Sharing uses recipient RSA-OAEP key wrapping. See [architecture](docs/SECURITY_ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [known limitations](docs/RELEASE_READINESS.md).
 
 A successful test suite is not a cryptographic audit. No claim of being unhackable, formally verified, resistant to malicious web delivery, or capable of erasing secrets already copied by a recipient is made.

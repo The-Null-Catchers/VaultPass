@@ -17,6 +17,10 @@ All resource identifiers are UUIDs. Primary API reads authorize against the curr
 | sessions.name, created, latest, expires, revoked | Sensitive device/session metadata | Device control; no invasive fingerprinting |
 | audit_events.event, created, user_id | Security metadata | Enum-like server-generated actions; no secret values |
 | email_verifications.digest, expires | Hash of random short-lived verification token | Single-use email verification |
+| recovery_keys.auth_hash | Argon2id hash of a recovery-key-derived proof | Verifies possession without storing the recovery key |
+| recovery_keys.account_key | Ciphertext + nonce/tag | Account key wrapped locally by the recovery key |
+| recovery_keys.version, recovery_attempts.recovery_version | Public random identifiers | Prevent an old verified attempt from applying to a replacement enrollment |
+| recovery_attempts.digest, expires | SHA-256 hash of a random five-minute token | Authorizes one reset after recovery proof verification |
 | sharing_keys.public_key | Public SPKI key | Recipient encryption |
 | sharing_keys.private_key | Ciphertext | Account-key-encrypted PKCS8 |
 | shares.sender_id, recipient_id, expires, revoked | Sensitive relationship metadata | Access/expiry |
