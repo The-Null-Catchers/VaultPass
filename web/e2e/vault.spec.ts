@@ -9,7 +9,8 @@ test("register, encrypt, relogin, decrypt, edit and sync another session",async(
  await expect(page.getByRole("heading",{name:"Fake demo login",exact:true})).toBeVisible();
  expect(requests.join("")).not.toContain(master);expect(requests.join("")).not.toContain(secret);expect(requests.join("")).not.toContain("Fake demo login");
  await page.getByRole("button",{name:"Lock vault",exact:true}).last().click();await expect(page.getByRole("button",{name:"Unlock vault",exact:true})).toBeVisible();
- await page.getByLabel("Email address").fill(email);await page.getByLabel("Master password",{exact:true}).fill(master);await page.getByRole("button",{name:"Unlock vault",exact:true}).click();
+ await page.getByLabel("Email address").fill(email);await page.getByLabel("Master password",{exact:true}).fill(master);const unlock=page.getByRole("button",{name:"Unlock vault",exact:true});await unlock.click();
+ await expect(unlock).toBeEnabled({timeout:30000});const authError=page.getByRole("alert");if(await authError.count())throw new Error(`Relogin failed: ${await authError.textContent()}`);
  await expect(page.getByRole("heading",{name:"All items",exact:true})).toBeVisible({timeout:15000});
  await expect(page.getByText("Fake demo login",{exact:true})).toBeVisible({timeout:15000});
  await page.getByText("Fake demo login",{exact:true}).click();await page.getByRole("button",{name:"Toggle password visibility"}).click();await expect(page.getByText(secret,{exact:true})).toBeVisible();
