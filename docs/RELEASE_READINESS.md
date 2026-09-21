@@ -14,11 +14,11 @@ Local checks executed successfully during implementation:
 - Ruff and mypy checks.
 - SQLite Alembic upgrade/schema-drift check (not a PostgreSQL substitute).
 - Web crypto round trips, key/context/tamper rejection, password rewrap, RFC 6238 vectors, recipient sharing and generator tests.
-- Web TypeScript, ESLint and production build.
+- Web TypeScript, ESLint, production build and browser end-to-end flow in CI.
 - npm runtime dependency audit: no reported vulnerabilities at that scan.
 - Flutter analyzer, crypto/TOTP/generator and locked-state widget tests.
 
-Additional interoperability/offline/backup tests and CI results are recorded after their actual execution. Physical biometric, real iOS, full mobile offline device testing and external penetration tests have not run.
+Cross-client interoperability, encrypted backup restore, mobile offline-queue tests, PostgreSQL migrations, Docker clean-start, Android builds and CodeQL passed in GitHub Actions run `35480633523` / CodeQL run `35480633519`. Physical biometric, real iOS, full mobile offline device testing and external penetration tests have not run.
 
 ## Implemented security review observations
 

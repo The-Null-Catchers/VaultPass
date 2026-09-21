@@ -1,0 +1,17 @@
+import {test,expect} from "@playwright/test";
+test("register, encrypt, relogin, decrypt, edit and sync another session",async({page,browser})=>{
+ const email=`e2e-${Date.now()}@example.com`,master="PUBLIC E2E MASTER PASSWORD",secret="FAKE-E2E-SECRET-NOT-FOR-USE";
+ const requests:string[]=[];page.on("request",r=>{if(r.url().includes("/api/"))requests.push(r.postData()||"");});
+ await page.goto("/");await page.getByRole("button",{name:"New here? Create an account"}).click();
+ await page.getByLabel("Email address").fill(email);await page.getByLabel("Master password",{exact:true}).fill(master);await page.getByRole("button",{name:"Create encrypted vault",exact:true}).click();
+ await expect(page.getByRole("heading",{name:"All items",exact:true})).toBeVisible();
+ await page.getByRole("button",{name:"Add item",exact:true}).click();await page.getByLabel("Title",{exact:true}).fill("Fake demo login");await page.getByLabel("Username / identifier",{exact:true}).fill("demo@example.com");await page.getByLabel("Password / secret",{exact:true}).fill(secret);await page.getByRole("button",{name:"Save encrypted item",exact:true}).click();
+ await expect(page.getByRole("heading",{name:"Fake demo login",exact:true})).toBeVisible();
+ expect(requests.join("")).not.toContain(master);expect(requests.join("")).not.toContain(secret);expect(requests.join("")).not.toContain("Fake demo login");
+ await page.getByRole("button",{name:"Lock vault",exact:true}).last().click();await expect(page.getByRole("button",{name:"Unlock vault",exact:true})).toBeVisible();
+ await page.getByLabel("Email address").fill(email);await page.getByLabel("Master password",{exact:true}).fill(master);await page.getByRole("button",{name:"Unlock vault",exact:true}).click();
+ await page.getByRole("button",{name:/Fake demo login/}).click();await page.getByRole("button",{name:"Toggle password visibility"}).click();await expect(page.getByText(secret,{exact:true})).toBeVisible();
+ await page.getByRole("button",{name:"Edit item",exact:true}).click();await page.getByLabel("Title",{exact:true}).fill("Edited fake login");await page.getByRole("button",{name:"Save encrypted item",exact:true}).click();await expect(page.getByRole("heading",{name:"Edited fake login"})).toBeVisible();
+ const context=await browser.newContext();const other=await context.newPage();await other.goto("/");await other.getByLabel("Email address").fill(email);await other.getByLabel("Master password",{exact:true}).fill(master);await other.getByRole("button",{name:"Unlock vault",exact:true}).click();await expect(other.getByRole("button",{name:/Edited fake login/})).toBeVisible();await other.getByRole("button",{name:/Edited fake login/}).click();await other.getByRole("button",{name:"Toggle password visibility"}).click();await expect(other.getByText(secret,{exact:true})).toBeVisible();
+ await context.close();
+});
