@@ -11,9 +11,10 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from webauthn import (
     generate_authentication_options,
     generate_registration_options,
@@ -58,6 +59,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 DB = Annotated[Session, Depends(db)]
 Auth = Annotated[DeviceSession, Depends(authenticated)]
 ph = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=4)
@@ -76,11 +78,18 @@ async def headers(request: Request, call_next):
         origin = request.headers.get("origin")
         if origin and origin not in settings.allowed_origins:
             return JSONResponse(status_code=403, content={"detail": "Origin denied"})
-        if (
-            not request.headers.get("content-length", "0").isdigit()
-            or int(request.headers.get("content-length", "0")) > 400000
-        ):
+        content_length = request.headers.get("content-length")
+        if content_length is not None and not content_length.isdigit():
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+        if content_length is not None and int(content_length) > settings.max_request_bytes:
             return JSONResponse(status_code=413, content={"detail": "Request too large"})
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > settings.max_request_bytes:
+                return JSONResponse(status_code=413, content={"detail": "Request too large"})
+        # Starlette's cached request replays this bounded body to the endpoint.
+        request._body = bytes(body)
     response = await call_next(request)
     response.headers.update(
         {
@@ -88,6 +97,7 @@ async def headers(request: Request, call_next):
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "no-referrer",
             "X-Frame-Options": "DENY",
+            "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
         }
     )
     return response
@@ -116,6 +126,24 @@ def check_hash(encoded: str | None, secret: str, detail: str = "Invalid credenti
 
 
 def issue(db: Session, user: User, name: str):
+    # Serialize session issuance per account so concurrent logins cannot bypass the cap.
+    db.scalar(select(User.id).where(User.id == user.id).with_for_update())
+    active = list(
+        db.scalars(
+            select(DeviceSession)
+            .where(
+                DeviceSession.user_id == user.id,
+                DeviceSession.revoked.is_(False),
+                DeviceSession.expires > now(),
+            )
+            .order_by(DeviceSession.latest, DeviceSession.created)
+            .with_for_update()
+        )
+    )
+    overflow = len(active) - settings.max_active_sessions + 1
+    for stale in active[: max(overflow, 0)]:
+        stale.revoked = True
+        audit(db, user.id, "session_limit_revoked_oldest")
     access, refresh = token(), token()
     device = DeviceSession(
         user_id=user.id,
@@ -242,7 +270,7 @@ def register(body: s.Register, db: DB):
 
 @app.post("/auth/login", dependencies=[Depends(rate_limit)])
 def login(body: s.Login, db: DB):
-    user = db.scalar(select(User).where(User.email == str(body.email).lower()))
+    user = db.scalar(select(User).where(User.email == str(body.email).lower()).with_for_update())
     try:
         check_secret(user, body.auth_secret)
     except HTTPException:
@@ -260,12 +288,25 @@ def login(body: s.Login, db: DB):
 
 @app.post("/auth/passkey/complete", dependencies=[Depends(rate_limit)])
 def complete_passkey_login(body: s.PasskeyComplete, db: DB):
+    challenge_digest = digest(body.token)
+    candidate = db.scalar(
+        select(PasskeyChallenge).where(PasskeyChallenge.digest == challenge_digest)
+    )
+    if candidate is None or candidate.purpose != "login" or candidate.expires <= now():
+        raise HTTPException(401, "Invalid or expired passkey challenge")
+    user = db.scalar(select(User).where(User.id == candidate.user_id).with_for_update())
     pending = db.scalar(
         select(PasskeyChallenge)
-        .where(PasskeyChallenge.digest == digest(body.token))
+        .where(PasskeyChallenge.digest == challenge_digest)
         .with_for_update()
     )
-    if pending is None or pending.purpose != "login" or pending.expires <= now():
+    if (
+        user is None
+        or pending is None
+        or pending.user_id != user.id
+        or pending.purpose != "login"
+        or pending.expires <= now()
+    ):
         raise HTTPException(401, "Invalid or expired passkey challenge")
     credential_id = b64url(unb64url(body.credential.raw_id))
     credential = db.get(PasskeyCredential, credential_id)
@@ -289,8 +330,6 @@ def complete_passkey_login(body: s.PasskeyComplete, db: DB):
         audit(db, pending.user_id, "passkey_login_failed")
         db.commit()
         raise HTTPException(401, "Passkey verification failed") from None
-    user = db.get(User, pending.user_id)
-    assert user
     credential.sign_count = verified.new_sign_count
     credential.device_type = verified.credential_device_type.value
     credential.backed_up = verified.credential_backed_up
@@ -370,12 +409,14 @@ def passkeys(db: DB, device: Auth):
 
 @app.post("/account/passkeys/options", dependencies=[Depends(rate_limit)], status_code=201)
 def begin_passkey_enrollment(body: s.PasskeyEnrollmentBegin, db: DB, device: Auth):
-    user = db.get(User, device.user_id)
+    user = db.scalar(select(User).where(User.id == device.user_id).with_for_update())
     check_secret(user, body.current_auth_secret)
     assert user
     credentials = list(
         db.scalars(select(PasskeyCredential).where(PasskeyCredential.user_id == user.id))
     )
+    if len(credentials) >= settings.max_passkeys:
+        raise HTTPException(409, "Passkey limit reached")
     challenge = secrets.token_bytes(32)
     opaque = token()
     options = generate_registration_options(
@@ -420,6 +461,8 @@ def begin_passkey_enrollment(body: s.PasskeyEnrollmentBegin, db: DB, device: Aut
 
 @app.post("/account/passkeys", dependencies=[Depends(rate_limit)], status_code=201)
 def complete_passkey_enrollment(body: s.PasskeyComplete, db: DB, device: Auth):
+    user = db.scalar(select(User).where(User.id == device.user_id).with_for_update())
+    assert user
     pending = db.scalar(
         select(PasskeyChallenge)
         .where(PasskeyChallenge.digest == digest(body.token))
@@ -433,6 +476,13 @@ def complete_passkey_enrollment(body: s.PasskeyComplete, db: DB, device: Auth):
         or pending.expires <= now()
     ):
         raise HTTPException(401, "Invalid or expired passkey challenge")
+    credential_count = db.scalar(
+        select(func.count(PasskeyCredential.id)).where(PasskeyCredential.user_id == device.user_id)
+    )
+    if credential_count is not None and credential_count >= settings.max_passkeys:
+        db.delete(pending)
+        db.commit()
+        raise HTTPException(409, "Passkey limit reached")
     try:
         verified = verify_registration_response(
             credential=body.credential.model_dump(by_alias=True, exclude_none=True),
@@ -758,6 +808,10 @@ def write(vault_id: uuid.UUID, item_id: uuid.UUID, body: s.Write, db: DB, device
         return serialize(item)
     if (item.version if item else 0) != body.expected_version or (item and item.purged):
         raise HTTPException(409, "Revision conflict; fetch remote and preserve your local edit")
+    if item is None:
+        item_count = db.scalar(select(func.count(Item.id)).where(Item.vault_id == vault.id))
+        if item_count is not None and item_count >= settings.max_vault_items:
+            raise HTTPException(409, "Vault item limit reached")
     if item:
         db.add(Revision(item_id=item.id, version=item.version, payload=item.payload))
     else:

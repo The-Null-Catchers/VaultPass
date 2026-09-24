@@ -23,6 +23,6 @@ Trust boundary: encryption/decryption runs in the client. The server/database/qu
 | Sharing key substitution | SHA-256 fingerprint verified out of band before sending | No automated transparency infrastructure or signed sender identity |
 | Shared recipient retention | Expiry/revocation prevents future API downloads | Cannot retract viewed/copied material |
 | Dependency compromise | Locks, automated audits, CodeQL, no secret credentials in repo | Scans do not prove absence of malicious code; independent review required |
-| DoS | Reverse-proxy body limits, envelope bounds, rate limits, paged sync | Account quotas and per-user storage caps are not yet implemented |
+| DoS | Bounded request streams, envelope bounds, Redis rate limits, trusted-host validation, paged sync, and per-vault item/passkey/session caps | Distributed account-targeted throttling and ciphertext-byte quotas still require deployment-specific controls |
 
 No claim of protection from compromised unlocked endpoints, malicious JavaScript delivery, invasive extensions, coercion, or a malicious recipient. The code is pre-release and should initially handle synthetic data only.

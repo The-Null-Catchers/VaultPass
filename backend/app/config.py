@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -6,6 +7,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://vaultpass:vaultpass@localhost:5432/vaultpass"
     redis_url: str = "redis://localhost:6379/0"
     allowed_origins: list[str] = ["http://localhost:3000"]
+    allowed_hosts: list[str] = ["localhost", "127.0.0.1", "testserver", "api"]
     environment: str = "development"
     smtp_host: str = "mailpit"
     smtp_port: int = 1025
@@ -15,7 +17,12 @@ class Settings(BaseSettings):
     public_web_url: str = "http://localhost:3000"
     webauthn_rp_id: str = "localhost"
     webauthn_origin: str = "http://localhost:3000"
-    rate_limit: int = 20
+    rate_limit: int = Field(default=20, ge=1, le=10000)
+    max_request_bytes: int = Field(default=400000, ge=1024, le=10000000)
+    max_vault_items: int = Field(default=5000, ge=1, le=100000)
+    max_active_sessions: int = Field(default=20, ge=1, le=1000)
+    max_passkeys: int = Field(default=10, ge=1, le=100)
+    audit_retention_days: int = Field(default=365, ge=30, le=3650)
 
 
 settings = Settings()

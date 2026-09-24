@@ -42,7 +42,7 @@ Cross-client interoperability, encrypted backup restore, mobile offline-queue te
 2. Organizations/team vaults, invitations/roles, editable sharing and membership key rotation.
 3. iOS biometric unlock, mobile passkey/enrollment UX, mobile sharing/import/export/account-settings parity, QR TOTP scanning, comprehensive Flutter integration tests and offline crash/multi-device device tests.
 4. Encrypted attachments, dedicated structured card/identity forms, CSV/provider adapters, passphrase generator, richer password age/MFA/duplicate analysis, recent/archive sections.
-5. Quotas, GCM per-key usage limits/key rotation, account-targeted throttling, edge proxy limits, automated trash/expired-share retention and security notification preferences/new-device emails.
+5. Ciphertext-byte quotas, GCM per-key usage limits/key rotation, account-targeted throttling, edge proxy limits, automated trash/expired-share retention and security notification preferences/new-device emails. Initial request, item, active-session and passkey caps are implemented but still need production tuning.
 6. Tamper-evident external audit storage, abuse/admin operations UI and operational monitoring/alerting/runbooks.
 7. Complete browser E2E/accessibility/visual regression coverage, physical cross-platform passkey testing, PostgreSQL concurrency tests, clean-install/backup restoration drills, real email delivery checks.
 8. A configured HTTPS test/production endpoint, production Android signing and iOS signing. Default Android CI URL is intentionally non-routable unless configured.

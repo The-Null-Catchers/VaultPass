@@ -15,7 +15,7 @@ A privacy-focused password and secrets workspace with a Next.js web client, Flut
 - Recipient-encrypted read-only snapshots with expiry and revocation; fingerprint comparison is required before sending.
 - Responsive light/dark web application with local-only tokens, inactivity/background locking and nonce-based CSP.
 - Flutter online registration/login, encrypted offline cache and edit queue, conflict preservation, local search, TOTP, device management, Android device-authenticated key storage and screenshot protection.
-- PostgreSQL/Alembic, Redis rate limiting, Celery transactional email and session cleanup, Docker Compose, GitHub Actions, CodeQL, dependency scanning.
+- PostgreSQL/Alembic, Redis rate limiting, bounded request/resource quotas, trusted-host enforcement, Celery transactional email and retention cleanup, Docker Compose, GitHub Actions, CodeQL, dependency scanning.
 
 The mobile client and web client deliberately share an interoperable cryptographic protocol. Flutter currently uses the web client for backup/import, sharing, email verification and password/account changes.
 

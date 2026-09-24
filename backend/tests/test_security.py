@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import uuid
 from types import SimpleNamespace
@@ -217,6 +218,114 @@ def test_plaintext_extra_fields_rejected_and_not_reflected(client):
         ).status_code
         == 403
     )
+
+
+def test_request_boundary_and_security_headers(client):
+    from app.config import settings
+    from app.main import headers
+
+    health = client.get("/health")
+    assert health.status_code == 200
+    assert health.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=()"
+    assert client.get("/health", headers={"Host": "evil.example"}).status_code == 400
+    too_large = client.post(
+        "/auth/lookup",
+        content=b"{}",
+        headers={
+            "Content-Type": "application/json",
+            "Content-Length": str(settings.max_request_bytes + 1),
+        },
+    )
+    assert too_large.status_code == 413
+
+    async def oversized_chunk():
+        return {
+            "type": "http.request",
+            "body": b"x" * (settings.max_request_bytes + 1),
+            "more_body": False,
+        }
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [(b"transfer-encoding", b"chunked")],
+            "client": ("127.0.0.1", 1),
+        },
+        oversized_chunk,
+    )
+    chunked = asyncio.run(headers(request, None))
+    assert chunked.status_code == 413
+
+
+def test_resource_caps_preserve_existing_access(client):
+    from app.config import settings
+    from app.db import db
+    from app.main import app
+    from app.models import PasskeyCredential
+
+    with patch.object(settings, "max_vault_items", 1):
+        body, _, auth = register(client)
+        first_id, second_id = uuid.uuid4(), uuid.uuid4()
+        first_path = f"/vaults/{body['vault_id']}/items/{first_id}"
+        payload = {"expected_version": 0, "payload": envelope(), "deleted": False}
+        assert client.put(first_path, json=payload, headers=auth).status_code == 200
+        assert (
+            client.put(
+                f"/vaults/{body['vault_id']}/items/{second_id}", json=payload, headers=auth
+            ).status_code
+            == 409
+        )
+        assert (
+            client.put(
+                first_path, json={**payload, "expected_version": 1}, headers=auth
+            ).status_code
+            == 200
+        )
+
+    with patch.object(settings, "max_active_sessions", 2):
+        _, original, original_auth = register(client, "sessions@example.com")
+        login_body = {
+            "email": "sessions@example.com",
+            "auth_secret": "a" * 64,
+            "device": "Additional device",
+        }
+        second = client.post("/auth/login", json=login_body).json()
+        third = client.post("/auth/login", json=login_body).json()
+        third_auth = {"Authorization": "Bearer " + third["access_token"]}
+        sessions = client.get("/devices", headers=third_auth).json()
+        assert len([row for row in sessions if not row["revoked"]]) == 2
+        assert len([row for row in sessions if row["revoked"]]) == 1
+        assert client.get("/vaults", headers=third_auth).status_code == 200
+        old_auths = [original_auth, {"Authorization": "Bearer " + second["access_token"]}]
+        assert (
+            sum(client.get("/vaults", headers=value).status_code == 401 for value in old_auths) == 1
+        )
+        assert original["session_id"] in {row["id"] for row in sessions}
+
+    passkey_body, _, passkey_auth = register(client, "passkey-cap@example.com")
+    session_generator = app.dependency_overrides[db]()
+    database = next(session_generator)
+    database.add(
+        PasskeyCredential(
+            id="quota-passkey",
+            user_id=uuid.UUID(passkey_body["id"]),
+            public_key="cHVibGljLWtleQ",
+            name="Existing passkey",
+            transports=["internal"],
+            aaguid="test",
+            device_type="single_device",
+        )
+    )
+    database.commit()
+    session_generator.close()
+    with patch.object(settings, "max_passkeys", 1):
+        result = client.post(
+            "/account/passkeys/options",
+            json={"current_auth_secret": "a" * 64, "name": "One too many"},
+            headers=passkey_auth,
+        )
+    assert result.status_code == 409 and result.json()["detail"] == "Passkey limit reached"
 
 
 def test_trash_purge_tombstone_and_account_deletion(client):
