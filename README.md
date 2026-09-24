@@ -7,7 +7,7 @@ A privacy-focused password and secrets workspace with a Next.js web client, Flut
 ## Implemented
 
 - Client-side Argon2id, separated HKDF authentication/wrapping keys, random account/vault keys, AES-256-GCM envelopes with contextual authentication.
-- Registration, login, rotating refresh tokens with replay revocation, session/device revocation, email verification, password change, optional zero-knowledge recovery key, account deletion.
+- Registration, master-password plus passkey MFA login, rotating refresh tokens with replay revocation, session/device revocation, email verification, password change, optional zero-knowledge recovery key, account deletion.
 - Login, note, card, identity, API credential, recovery-code and developer-secret records. Specialized fields currently use encrypted notes/custom text.
 - Local search, folders/tags, favorites, trash, encrypted revision history, explicit conflict rejection, idempotent retries, paginated sync.
 - Password generation, local short/reused-password checks, RFC 6238 TOTP, opt-in k-anonymity breach checking.
@@ -49,6 +49,8 @@ docker compose up --build -d
 - Development email inbox: http://localhost:8025
 
 Register a new account with a unique master password. Use synthetic data while evaluating. Request verification from Settings and copy its token from Mailpit. PostgreSQL and Redis have no public ports. Services wait for migrations before starting the API.
+
+Passkeys work on `localhost` during local development. For an HTTPS deployment, set `WEBAUTHN_RP_ID` to the bare domain (for example `vault.example.com`) and `WEBAUTHN_ORIGIN` to its exact origin (for example `https://vault.example.com`) before enrolling credentials. Changing either value invalidates authentication with credentials enrolled for the old relying party.
 
 To test Flutter against the host API, temporarily publish the API port to your emulator network (local machine only), then:
 

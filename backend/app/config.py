@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     mail_from: str = "VaultPass <security@localhost>"
     public_web_url: str = "http://localhost:3000"
+    webauthn_rp_id: str = "localhost"
+    webauthn_origin: str = "http://localhost:3000"
     rate_limit: int = 20
 
 

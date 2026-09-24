@@ -6,7 +6,7 @@ from sqlalchemy import delete
 
 from .config import settings
 from .db import SessionLocal
-from .models import DeviceSession, Verification, now
+from .models import DeviceSession, PasskeyChallenge, RecoveryAttempt, Verification, now
 
 celery = Celery("vaultpass", broker=settings.redis_url)
 celery.conf.update(
@@ -38,4 +38,6 @@ def send_email(recipient: str, subject: str, body: str):
 def cleanup():
     with SessionLocal.begin() as session:
         session.execute(delete(Verification).where(Verification.expires < now()))
+        session.execute(delete(RecoveryAttempt).where(RecoveryAttempt.expires < now()))
+        session.execute(delete(PasskeyChallenge).where(PasskeyChallenge.expires < now()))
         session.execute(delete(DeviceSession).where(DeviceSession.expires < now()))

@@ -10,7 +10,7 @@ This section is updated with observed commands/results at handoff. CI definition
 
 Local checks executed successfully during implementation:
 
-- Backend authentication/authorization/revocation/trash/rate-limiter and one-time recovery tests.
+- Backend authentication/passkey/recovery/authorization/revocation/trash/rate-limiter tests.
 - Ruff and mypy checks.
 - SQLite Alembic upgrade/schema-drift check (not a PostgreSQL substitute).
 - Web crypto round trips, key/context/tamper rejection, password/recovery rewrap, RFC 6238 vectors, recipient sharing and generator tests.
@@ -34,18 +34,18 @@ Cross-client interoperability, encrypted backup restore, mobile offline-queue te
 - No plaintext export feature or plaintext secret admin console exists.
 - Permanent deletion retains only sync tombstones; account deletion cascades.
 - Recovery keys are generated and used client-side; recovery proofs and five-minute reset tokens are one-time and successful recovery revokes all sessions.
+- Passkey MFA uses purpose-bound five-minute WebAuthn challenges, requires authenticator user verification, and issues no session after the password proof until the assertion succeeds.
 
 ## Remaining implementation and release gates
 
 1. Independent cryptographic/security review; full threat-driven penetration testing; physical Android key invalidation/biometric/background/clipboard tests and iOS Keychain behavior.
-2. Account MFA/passkeys. Vault TOTP support is not login MFA; server-held TOTP seeds would conflict with the documented zero-knowledge boundary.
-3. Organizations/team vaults, invitations/roles, editable sharing and membership key rotation.
-4. iOS biometric unlock, mobile sharing/import/export/account-settings parity, QR TOTP scanning, comprehensive Flutter integration tests and offline crash/multi-device device tests.
-5. Encrypted attachments, dedicated structured card/identity forms, CSV/provider adapters, passphrase generator, richer password age/MFA/duplicate analysis, recent/archive sections.
-6. Quotas, GCM per-key usage limits/key rotation, account-targeted throttling, edge proxy limits, automated trash/expired-share retention and security notification preferences/new-device emails.
-7. Tamper-evident external audit storage, abuse/admin operations UI and operational monitoring/alerting/runbooks.
-8. Complete browser E2E/accessibility/visual regression coverage, PostgreSQL concurrency tests, clean-install/backup restoration drills, real email delivery checks.
-9. A configured HTTPS test/production endpoint, production Android signing and iOS signing. Default Android CI URL is intentionally non-routable unless configured.
-10. Recovery/import/share verification UX hardening and third-party review. Recovery is web-only in this release. Sharing recipient identity requires an out-of-band fingerprint check; there is no key transparency or sender signature.
+2. Organizations/team vaults, invitations/roles, editable sharing and membership key rotation.
+3. iOS biometric unlock, mobile passkey/enrollment UX, mobile sharing/import/export/account-settings parity, QR TOTP scanning, comprehensive Flutter integration tests and offline crash/multi-device device tests.
+4. Encrypted attachments, dedicated structured card/identity forms, CSV/provider adapters, passphrase generator, richer password age/MFA/duplicate analysis, recent/archive sections.
+5. Quotas, GCM per-key usage limits/key rotation, account-targeted throttling, edge proxy limits, automated trash/expired-share retention and security notification preferences/new-device emails.
+6. Tamper-evident external audit storage, abuse/admin operations UI and operational monitoring/alerting/runbooks.
+7. Complete browser E2E/accessibility/visual regression coverage, physical cross-platform passkey testing, PostgreSQL concurrency tests, clean-install/backup restoration drills, real email delivery checks.
+8. A configured HTTPS test/production endpoint, production Android signing and iOS signing. Default Android CI URL is intentionally non-routable unless configured.
+9. Recovery/import/share verification UX hardening and third-party review. Recovery is web-only in this release. Sharing recipient identity requires an out-of-band fingerprint check; there is no key transparency or sender signature.
 
 No release label should be applied until these gaps are triaged and the mandatory gates for its advertised scope pass. Old encrypted backups/offline copies remain accessible with old keys even after session revocation or password changes.

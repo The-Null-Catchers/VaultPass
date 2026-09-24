@@ -7,6 +7,8 @@ import { breachCount, generate, health } from "../lib/generator";
 import { createIdentity, fingerprint, encryptShare, decryptShare } from "../lib/sharing";
 import { restoreBackup, validateItem } from "../lib/backup";
 import { totp } from "../lib/totp";
+import { authenticatePasskey, createPasskey } from "../lib/passkeys";
+import type { AuthenticationOptions, RegistrationOptions } from "../lib/passkeys";
 type Data = {
   title: string;
   type: string;
@@ -54,6 +56,21 @@ type Shared = {
   data?: Data;
 };
 type Event = { id: string; event: string; created: number };
+type Passkey = {
+  id: string;
+  name: string;
+  created: number;
+  latest: number;
+  device_type: string;
+  backed_up: boolean;
+  transports: string[];
+};
+type PasskeyPrompt = {
+  mfa_required: true;
+  token: string;
+  expires_in: number;
+  public_key: AuthenticationOptions;
+};
 const blank = (): Data => ({
   title: "",
   type: "login",
@@ -126,6 +143,9 @@ export default function Home() {
   const [recoveryEnabled, setRecoveryEnabled] = useState(false),
     [recoveryContext, setRecoveryContext] = useState(""),
     [shownRecovery, setShownRecovery] = useState("");
+  const [passkeys, setPasskeys] = useState<Passkey[]>([]),
+    [passkeyName, setPasskeyName] = useState("This device"),
+    [passkeyMaster, setPasskeyMaster] = useState("");
   const [shares, setShares] = useState<Shared[]>([]),
     [identity, setIdentity] = useState<{
       public_key: string;
@@ -231,11 +251,18 @@ export default function Home() {
         if (params.profile !== PROFILE) throw new Error("Unsupported key derivation profile");
         const derived = await derive(master, params.salt);
         try {
-          result = await api<Session>("/auth/login", "POST", {
+          const response = await api<Session | PasskeyPrompt>("/auth/login", "POST", {
             email,
             auth_secret: derived.auth,
             device: "Web browser",
           });
+          if ("mfa_required" in response) {
+            const credential = await authenticatePasskey(response.public_key);
+            result = await api<Session>("/auth/passkey/complete", "POST", {
+              token: response.token,
+              credential,
+            });
+          } else result = response;
         } finally {
           derived.wrap.fill(0);
         }
@@ -338,9 +365,13 @@ export default function Home() {
     if (name === "Security") void run(async () => setEvents(await api<Event[]>("/events")));
     if (name === "Settings")
       void run(async () => {
-        const status = await api<{ enabled: boolean; context: string }>("/account/recovery");
+        const [status, registered] = await Promise.all([
+          api<{ enabled: boolean; context: string }>("/account/recovery"),
+          api<Passkey[]>("/account/passkeys"),
+        ]);
         setRecoveryEnabled(status.enabled);
         setRecoveryContext(status.context);
+        setPasskeys(registered);
       });
   };
   const filtered = items.filter((i) => {
@@ -912,6 +943,84 @@ export default function Home() {
                       </button>
                     )}
                   </>
+                )}
+              </section>
+              <section className="panel">
+                <h2>Passkey MFA</h2>
+                <p>
+                  Require a passkey after your master password before VaultPass issues a session.
+                  Your passkey does not decrypt the vault and no TOTP seed is stored by the server.
+                </p>
+                {passkeys.map((passkey) => (
+                  <div className="device" key={passkey.id}>
+                    <KeyRound />
+                    <div>
+                      <strong>{passkey.name}</strong>
+                      <small>
+                        {passkey.backed_up ? "Synced passkey" : "Device-bound passkey"} · Last used {new Date(passkey.latest * 1000).toLocaleString()}
+                      </small>
+                    </div>
+                    <button
+                      disabled={busy || !passkeyMaster}
+                      onClick={() =>
+                        void run(async () => {
+                          const d = await derive(passkeyMaster, session.bundle.salt);
+                          try {
+                            await api(`/account/passkeys/${encodeURIComponent(passkey.id)}`, "DELETE", {
+                              auth_secret: d.auth,
+                            });
+                            setPasskeys(await api<Passkey[]>("/account/passkeys"));
+                            setPasskeyMaster("");
+                            notify("Passkey removed");
+                          } finally {
+                            d.wrap.fill(0);
+                          }
+                        })
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <label>
+                  Passkey name
+                  <input maxLength={80} value={passkeyName} onChange={(e) => setPasskeyName(e.target.value)} />
+                </label>
+                <label>
+                  Master password for passkeys
+                  <input type="password" value={passkeyMaster} onChange={(e) => setPasskeyMaster(e.target.value)} />
+                </label>
+                <button
+                  disabled={busy || !passkeyMaster || !passkeyName.trim()}
+                  onClick={() =>
+                    void run(async () => {
+                      const d = await derive(passkeyMaster, session.bundle.salt);
+                      try {
+                        const enrollment = await api<{
+                          token: string;
+                          public_key: RegistrationOptions;
+                        }>("/account/passkeys/options", "POST", {
+                          current_auth_secret: d.auth,
+                          name: passkeyName.trim(),
+                        });
+                        const credential = await createPasskey(enrollment.public_key);
+                        await api("/account/passkeys", "POST", {
+                          token: enrollment.token,
+                          credential,
+                        });
+                        setPasskeys(await api<Passkey[]>("/account/passkeys"));
+                        setPasskeyMaster("");
+                        notify("Passkey MFA enabled");
+                      } finally {
+                        d.wrap.fill(0);
+                      }
+                    })
+                  }
+                >
+                  Add passkey
+                </button>
+                {passkeys.length === 1 && (
+                  <p className="warning">Add another passkey or keep your recovery key available before relying on this authenticator.</p>
                 )}
               </section>
               <section className="panel">

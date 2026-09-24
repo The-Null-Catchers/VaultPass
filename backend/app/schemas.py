@@ -50,6 +50,48 @@ class Login(Strict):
     device: str = Field(default="New device", min_length=1, max_length=80)
 
 
+class PasskeyEnrollmentBegin(Strict):
+    current_auth_secret: str = Field(pattern=r"^[0-9a-f]{64}$")
+    name: str = Field(min_length=1, max_length=80)
+
+
+class WebAuthnResponse(Strict):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    client_data_json: str = Field(alias="clientDataJSON", min_length=16, max_length=16384)
+    attestation_object: str | None = Field(
+        default=None, alias="attestationObject", min_length=16, max_length=131072
+    )
+    authenticator_data: str | None = Field(
+        default=None, alias="authenticatorData", min_length=16, max_length=4096
+    )
+    signature: str | None = Field(default=None, min_length=16, max_length=4096)
+    user_handle: str | None = Field(default=None, alias="userHandle", max_length=2048)
+    transports: list[str] | None = Field(default=None, max_length=8)
+
+
+class WebAuthnCredential(Strict):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    id: str = Field(min_length=1, max_length=1024, pattern=r"^[A-Za-z0-9_-]+$")
+    raw_id: str = Field(alias="rawId", min_length=1, max_length=2048, pattern=r"^[A-Za-z0-9_-]+$")
+    type: Literal["public-key"]
+    authenticator_attachment: str | None = Field(
+        default=None, alias="authenticatorAttachment", max_length=32
+    )
+    response: WebAuthnResponse
+
+    @field_validator("id", "raw_id")
+    @classmethod
+    def valid_b64url_length(cls, value: str):
+        if len(value) % 4 == 1:
+            raise ValueError("Invalid base64url encoding")
+        return value
+
+
+class PasskeyComplete(Strict):
+    token: str = Field(min_length=40, max_length=128)
+    credential: WebAuthnCredential
+
+
 class Lookup(Strict):
     email: EmailStr
 

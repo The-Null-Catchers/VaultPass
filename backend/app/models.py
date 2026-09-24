@@ -128,6 +128,38 @@ class RecoveryAttempt(Base):
     expires: Mapped[int]
 
 
+class PasskeyCredential(Base):
+    __tablename__ = "passkey_credentials"
+    id: Mapped[str] = mapped_column(String(1024), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    public_key: Mapped[str] = mapped_column(String(4096))
+    sign_count: Mapped[int] = mapped_column(Integer, default=0)
+    name: Mapped[str] = mapped_column(String(80))
+    transports: Mapped[list[str]] = mapped_column(JSON, default=list)
+    aaguid: Mapped[str] = mapped_column(String(64))
+    device_type: Mapped[str] = mapped_column(String(32))
+    backed_up: Mapped[bool] = mapped_column(Boolean, default=False)
+    created: Mapped[int] = mapped_column(default=now)
+    latest: Mapped[int] = mapped_column(default=now)
+
+
+class PasskeyChallenge(Base):
+    __tablename__ = "passkey_challenges"
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("sessions.id", ondelete="CASCADE"), nullable=True
+    )
+    challenge: Mapped[str] = mapped_column(String(128))
+    purpose: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(80))
+    expires: Mapped[int]
+
+
 class SharingKey(Base):
     __tablename__ = "sharing_keys"
     user_id: Mapped[uuid.UUID] = mapped_column(

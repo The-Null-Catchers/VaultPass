@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 import secrets
 import uuid
 from typing import Annotated
@@ -13,6 +14,21 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from webauthn import (
+    generate_authentication_options,
+    generate_registration_options,
+    options_to_json,
+    verify_authentication_response,
+    verify_registration_response,
+)
+from webauthn.helpers.exceptions import WebAuthnException
+from webauthn.helpers.structs import (
+    AuthenticatorSelectionCriteria,
+    AuthenticatorTransport,
+    PublicKeyCredentialDescriptor,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+)
 
 from . import schemas as s
 from .config import settings
@@ -21,6 +37,8 @@ from .models import (
     Audit,
     DeviceSession,
     Item,
+    PasskeyChallenge,
+    PasskeyCredential,
     RecoveryAttempt,
     RecoveryKey,
     RefreshToken,
@@ -120,6 +138,58 @@ def issue(db: Session, user: User, name: str):
     }
 
 
+def b64url(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode()
+
+
+def unb64url(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def credential_descriptor(row: PasskeyCredential) -> PublicKeyCredentialDescriptor:
+    transports = []
+    for value in row.transports:
+        try:
+            transports.append(AuthenticatorTransport(value))
+        except ValueError:
+            continue
+    return PublicKeyCredentialDescriptor(id=unb64url(row.id), transports=transports or None)
+
+
+def challenge_options(db: Session, user: User, device_name: str):
+    credentials = list(
+        db.scalars(select(PasskeyCredential).where(PasskeyCredential.user_id == user.id))
+    )
+    challenge = secrets.token_bytes(32)
+    opaque = token()
+    options = generate_authentication_options(
+        rp_id=settings.webauthn_rp_id,
+        challenge=challenge,
+        timeout=300000,
+        allow_credentials=[credential_descriptor(row) for row in credentials],
+        user_verification=UserVerificationRequirement.REQUIRED,
+    )
+    db.execute(delete(PasskeyChallenge).where(PasskeyChallenge.expires <= now()))
+    db.add(
+        PasskeyChallenge(
+            digest=digest(opaque),
+            user_id=user.id,
+            challenge=b64url(challenge),
+            purpose="login",
+            name=device_name,
+            expires=now() + 300,
+        )
+    )
+    audit(db, user.id, "passkey_login_requested")
+    db.commit()
+    return {
+        "mfa_required": True,
+        "token": opaque,
+        "expires_in": 300,
+        "public_key": json.loads(options_to_json(options)),
+    }
+
+
 def owned(db: Session, vault_id: uuid.UUID, device: DeviceSession, lock=False) -> Vault:
     query = select(Vault).where(Vault.id == vault_id, Vault.owner_id == device.user_id)
     if lock:
@@ -181,7 +251,54 @@ def login(body: s.Login, db: DB):
             db.commit()
         raise
     assert user is not None
+    if db.scalar(select(PasskeyCredential.id).where(PasskeyCredential.user_id == user.id)):
+        return challenge_options(db, user, body.device)
     result = issue(db, user, body.device)
+    db.commit()
+    return result
+
+
+@app.post("/auth/passkey/complete", dependencies=[Depends(rate_limit)])
+def complete_passkey_login(body: s.PasskeyComplete, db: DB):
+    pending = db.scalar(
+        select(PasskeyChallenge)
+        .where(PasskeyChallenge.digest == digest(body.token))
+        .with_for_update()
+    )
+    if pending is None or pending.purpose != "login" or pending.expires <= now():
+        raise HTTPException(401, "Invalid or expired passkey challenge")
+    credential_id = b64url(unb64url(body.credential.raw_id))
+    credential = db.get(PasskeyCredential, credential_id)
+    if credential is None or credential.user_id != pending.user_id:
+        db.delete(pending)
+        audit(db, pending.user_id, "passkey_login_failed")
+        db.commit()
+        raise HTTPException(401, "Passkey verification failed")
+    try:
+        verified = verify_authentication_response(
+            credential=body.credential.model_dump(by_alias=True, exclude_none=True),
+            expected_challenge=unb64url(pending.challenge),
+            expected_rp_id=settings.webauthn_rp_id,
+            expected_origin=settings.webauthn_origin,
+            credential_public_key=unb64url(credential.public_key),
+            credential_current_sign_count=credential.sign_count,
+            require_user_verification=True,
+        )
+    except (ValueError, WebAuthnException):
+        db.delete(pending)
+        audit(db, pending.user_id, "passkey_login_failed")
+        db.commit()
+        raise HTTPException(401, "Passkey verification failed") from None
+    user = db.get(User, pending.user_id)
+    assert user
+    credential.sign_count = verified.new_sign_count
+    credential.device_type = verified.credential_device_type.value
+    credential.backed_up = verified.credential_backed_up
+    credential.latest = now()
+    device_name = pending.name
+    db.delete(pending)
+    result = issue(db, user, device_name)
+    audit(db, user.id, "passkey_login_completed")
     db.commit()
     return result
 
@@ -231,6 +348,141 @@ def account(db: DB, device: Auth):
     }
 
 
+@app.get("/account/passkeys")
+def passkeys(db: DB, device: Auth):
+    return [
+        {
+            "id": row.id,
+            "name": row.name,
+            "created": row.created,
+            "latest": row.latest,
+            "device_type": row.device_type,
+            "backed_up": row.backed_up,
+            "transports": row.transports,
+        }
+        for row in db.scalars(
+            select(PasskeyCredential)
+            .where(PasskeyCredential.user_id == device.user_id)
+            .order_by(PasskeyCredential.created.desc())
+        )
+    ]
+
+
+@app.post("/account/passkeys/options", dependencies=[Depends(rate_limit)], status_code=201)
+def begin_passkey_enrollment(body: s.PasskeyEnrollmentBegin, db: DB, device: Auth):
+    user = db.get(User, device.user_id)
+    check_secret(user, body.current_auth_secret)
+    assert user
+    credentials = list(
+        db.scalars(select(PasskeyCredential).where(PasskeyCredential.user_id == user.id))
+    )
+    challenge = secrets.token_bytes(32)
+    opaque = token()
+    options = generate_registration_options(
+        rp_id=settings.webauthn_rp_id,
+        rp_name="VaultPass",
+        user_name=user.email,
+        user_id=user.id.bytes,
+        user_display_name=user.email,
+        challenge=challenge,
+        timeout=300000,
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.PREFERRED,
+            user_verification=UserVerificationRequirement.REQUIRED,
+        ),
+        exclude_credentials=[credential_descriptor(row) for row in credentials],
+    )
+    db.execute(
+        delete(PasskeyChallenge).where(
+            PasskeyChallenge.user_id == user.id,
+            PasskeyChallenge.purpose == "enroll",
+            PasskeyChallenge.session_id == device.id,
+        )
+    )
+    db.add(
+        PasskeyChallenge(
+            digest=digest(opaque),
+            user_id=user.id,
+            session_id=device.id,
+            challenge=b64url(challenge),
+            purpose="enroll",
+            name=body.name,
+            expires=now() + 300,
+        )
+    )
+    db.commit()
+    return {
+        "token": opaque,
+        "expires_in": 300,
+        "public_key": json.loads(options_to_json(options)),
+    }
+
+
+@app.post("/account/passkeys", dependencies=[Depends(rate_limit)], status_code=201)
+def complete_passkey_enrollment(body: s.PasskeyComplete, db: DB, device: Auth):
+    pending = db.scalar(
+        select(PasskeyChallenge)
+        .where(PasskeyChallenge.digest == digest(body.token))
+        .with_for_update()
+    )
+    if (
+        pending is None
+        or pending.purpose != "enroll"
+        or pending.user_id != device.user_id
+        or pending.session_id != device.id
+        or pending.expires <= now()
+    ):
+        raise HTTPException(401, "Invalid or expired passkey challenge")
+    try:
+        verified = verify_registration_response(
+            credential=body.credential.model_dump(by_alias=True, exclude_none=True),
+            expected_challenge=unb64url(pending.challenge),
+            expected_rp_id=settings.webauthn_rp_id,
+            expected_origin=settings.webauthn_origin,
+            require_user_verification=True,
+        )
+    except (ValueError, WebAuthnException):
+        db.delete(pending)
+        audit(db, pending.user_id, "passkey_enrollment_failed")
+        db.commit()
+        raise HTTPException(401, "Passkey enrollment failed") from None
+    credential_id = b64url(verified.credential_id)
+    if db.get(PasskeyCredential, credential_id):
+        db.delete(pending)
+        db.commit()
+        raise HTTPException(409, "Passkey is already enrolled")
+    db.add(
+        PasskeyCredential(
+            id=credential_id,
+            user_id=device.user_id,
+            public_key=b64url(verified.credential_public_key),
+            sign_count=verified.sign_count,
+            name=pending.name,
+            transports=body.credential.response.transports or [],
+            aaguid=verified.aaguid,
+            device_type=verified.credential_device_type.value,
+            backed_up=verified.credential_backed_up,
+        )
+    )
+    db.delete(pending)
+    audit(db, device.user_id, "passkey_enrolled")
+    db.commit()
+    return {"ok": True, "id": credential_id}
+
+
+@app.delete("/account/passkeys/{credential_id}", dependencies=[Depends(rate_limit)])
+def delete_passkey(credential_id: str, body: s.Confirm, db: DB, device: Auth):
+    user = db.get(User, device.user_id)
+    check_secret(user, body.auth_secret)
+    credential = db.get(PasskeyCredential, credential_id)
+    if credential is None or credential.user_id != device.user_id:
+        raise HTTPException(404, "Passkey not found")
+    db.delete(credential)
+    audit(db, device.user_id, "passkey_removed")
+    db.commit()
+    return {"ok": True}
+
+
 @app.post("/account/password", dependencies=[Depends(rate_limit)])
 def change_password(body: s.Rewrap, db: DB, device: Auth):
     user = db.scalar(select(User).where(User.id == device.user_id).with_for_update())
@@ -239,6 +491,7 @@ def change_password(body: s.Rewrap, db: DB, device: Auth):
     user.auth_hash, user.bundle = ph.hash(body.auth_secret), body.bundle.model_dump()
     for other in db.scalars(select(DeviceSession).where(DeviceSession.user_id == user.id)):
         other.revoked = True
+    db.execute(delete(PasskeyChallenge).where(PasskeyChallenge.user_id == user.id))
     audit(db, user.id, "master_password_changed")
     db.commit()
     return {"ok": True, "login_required": True}
@@ -368,6 +621,8 @@ def recovery_complete(body: s.RecoveryComplete, db: DB):
     user.auth_hash, user.bundle = ph.hash(body.auth_secret), body.bundle.model_dump()
     for device in db.scalars(select(DeviceSession).where(DeviceSession.user_id == user.id)):
         device.revoked = True
+    db.execute(delete(PasskeyChallenge).where(PasskeyChallenge.user_id == user.id))
+    db.execute(delete(PasskeyCredential).where(PasskeyCredential.user_id == user.id))
     db.delete(attempt)
     db.delete(row)  # Recovery proof is one-time; enrollment must be repeated after use.
     audit(db, user.id, "account_recovered")

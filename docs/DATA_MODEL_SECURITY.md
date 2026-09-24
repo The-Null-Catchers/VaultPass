@@ -21,6 +21,9 @@ All resource identifiers are UUIDs. Primary API reads authorize against the curr
 | recovery_keys.account_key | Ciphertext + nonce/tag | Account key wrapped locally by the recovery key |
 | recovery_keys.version, recovery_attempts.recovery_version | Public random identifiers | Prevent an old verified attempt from applying to a replacement enrollment |
 | recovery_attempts.digest, expires | SHA-256 hash of a random five-minute token | Authorizes one reset after recovery proof verification |
+| passkey_credentials.id, public_key, sign_count | Public WebAuthn credential material | Verifies authenticator signatures and detects supported counter regressions; no private key |
+| passkey_credentials.name, transports, device_type, backed_up, timestamps | Sensitive authenticator metadata | Credential management and security UX |
+| passkey_challenges.digest, challenge, purpose, session_id, expires | Hash of opaque transaction token plus public one-time WebAuthn challenge metadata | Purpose/user/session binding and replay-resistant five-minute ceremonies |
 | sharing_keys.public_key | Public SPKI key | Recipient encryption |
 | sharing_keys.private_key | Ciphertext | Account-key-encrypted PKCS8 |
 | shares.sender_id, recipient_id, expires, revoked | Sensitive relationship metadata | Access/expiry |

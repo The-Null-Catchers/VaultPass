@@ -1,5 +1,6 @@
 import base64
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -117,6 +118,25 @@ def test_recovery_key_is_one_time_and_revokes_sessions(client):
         "account_key": envelope(),
     }
     assert client.post("/account/recovery", json=recovery, headers=auth).status_code == 201
+    from app.db import db
+    from app.main import app
+    from app.models import PasskeyCredential
+
+    session_generator = app.dependency_overrides[db]()
+    database = next(session_generator)
+    database.add(
+        PasskeyCredential(
+            id="recovery-test-passkey",
+            user_id=uuid.UUID(body["id"]),
+            public_key="cHVibGljLWtleQ",
+            name="Lost authenticator",
+            transports=["internal"],
+            aaguid="test",
+            device_type="single_device",
+        )
+    )
+    database.commit()
+    session_generator.close()
     status = client.get("/account/recovery", headers=auth).json()
     assert status["enabled"] is True and len(status["context"]) == 64
     assert client.post("/account/recovery", json=recovery, headers=auth).status_code == 409
@@ -162,12 +182,12 @@ def test_recovery_key_is_one_time_and_revokes_sessions(client):
         ).status_code
         == 401
     )
-    assert (
-        client.post(
-            "/auth/login", json={"email": body["email"], "auth_secret": "d" * 64}
-        ).status_code
-        == 200
+    recovered_login = client.post(
+        "/auth/login", json={"email": body["email"], "auth_secret": "d" * 64}
     )
+    assert recovered_login.status_code == 200 and "access_token" in recovered_login.json()
+    recovered_auth = {"Authorization": "Bearer " + recovered_login.json()["access_token"]}
+    assert client.get("/account/passkeys", headers=recovered_auth).json() == []
     assert client.post("/auth/recovery/complete", json=complete).status_code == 401
     fake = client.post("/auth/recovery/lookup", json={"email": "missing@example.com"}).json()
     assert set(fake) == {"context", "account_key"} and len(fake["context"]) == 64
@@ -236,6 +256,102 @@ def test_redis_limit_and_fail_closed():
         with pytest.raises(HTTPException) as exc:
             rate_limit(request)
         assert exc.value.status_code == 503
+
+
+def test_passkey_enrollment_login_replay_and_removal(client):
+    body, _, auth = register(client)
+    begin_body = {"current_auth_secret": "a" * 64, "name": "Test passkey"}
+    assert (
+        client.post(
+            "/account/passkeys/options",
+            json={**begin_body, "current_auth_secret": "f" * 64},
+            headers=auth,
+        ).status_code
+        == 401
+    )
+    begin = client.post("/account/passkeys/options", json=begin_body, headers=auth)
+    assert begin.status_code == 201
+    assert begin.json()["public_key"]["user"]["name"] == body["email"]
+    raw_id = base64.urlsafe_b64encode(b"test-credential-id").rstrip(b"=").decode()
+    registration = {
+        "id": raw_id,
+        "rawId": raw_id,
+        "type": "public-key",
+        "authenticatorAttachment": "platform",
+        "response": {
+            "clientDataJSON": base64.urlsafe_b64encode(b"client-data-json").decode(),
+            "attestationObject": base64.urlsafe_b64encode(b"attestation-object").decode(),
+            "transports": ["internal"],
+        },
+    }
+    verified_registration = SimpleNamespace(
+        credential_id=b"test-credential-id",
+        credential_public_key=b"credential-public-key",
+        sign_count=0,
+        aaguid="00000000-0000-0000-0000-000000000000",
+        credential_device_type=SimpleNamespace(value="single_device"),
+        credential_backed_up=False,
+    )
+    with patch("app.main.verify_registration_response", return_value=verified_registration):
+        enrolled = client.post(
+            "/account/passkeys",
+            json={"token": begin.json()["token"], "credential": registration},
+            headers=auth,
+        )
+    assert enrolled.status_code == 201, enrolled.text
+    passkeys = client.get("/account/passkeys", headers=auth).json()
+    assert len(passkeys) == 1 and passkeys[0]["name"] == "Test passkey"
+
+    first = client.post("/auth/login", json={"email": body["email"], "auth_secret": "a" * 64})
+    assert first.status_code == 200
+    assert first.json()["mfa_required"] is True and "access_token" not in first.json()
+    assertion = {
+        "id": raw_id,
+        "rawId": raw_id,
+        "type": "public-key",
+        "response": {
+            "clientDataJSON": base64.urlsafe_b64encode(b"client-data-json").decode(),
+            "authenticatorData": base64.urlsafe_b64encode(b"authenticator-data").decode(),
+            "signature": base64.urlsafe_b64encode(b"credential-signature").decode(),
+            "userHandle": None,
+        },
+    }
+    verified_authentication = SimpleNamespace(
+        new_sign_count=1,
+        credential_device_type=SimpleNamespace(value="single_device"),
+        credential_backed_up=False,
+    )
+    with patch("app.main.verify_authentication_response", return_value=verified_authentication):
+        completed = client.post(
+            "/auth/passkey/complete",
+            json={"token": first.json()["token"], "credential": assertion},
+        )
+    assert completed.status_code == 200 and "access_token" in completed.json()
+    assert (
+        client.post(
+            "/auth/passkey/complete",
+            json={"token": first.json()["token"], "credential": assertion},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.request(
+            "DELETE",
+            "/account/passkeys/" + raw_id,
+            headers=auth,
+            json={"auth_secret": "f" * 64},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.request(
+            "DELETE",
+            "/account/passkeys/" + raw_id,
+            headers=auth,
+            json={"auth_secret": "a" * 64},
+        ).status_code
+        == 200
+    )
 
 
 def test_sharing_authorization_expiry_and_revocation(client):
