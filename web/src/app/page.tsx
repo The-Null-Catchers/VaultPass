@@ -1198,3 +1198,247 @@ export default function Home() {
                           setDraft(blank());
                           setEditing(true);
                         }}
+                      >
+                        Add your first item
+                      </button>
+                    </div>
+                  )}
+                </section>
+                <section className="panel detail">
+                  {selectedItem ? (
+                    <>
+                      <div className="detail-heading">
+                        <div className="icon-box">
+                          <KeyRound />
+                        </div>
+                        <button
+                          className="icon-button"
+                          aria-label="Toggle favorite"
+                          onClick={() =>
+                            void run(() =>
+                              save(
+                                {
+                                  ...selectedItem.data,
+                                  favorite: !selectedItem.data.favorite,
+                                },
+                                selectedItem,
+                                selectedItem.deleted,
+                              ),
+                            )
+                          }
+                        >
+                          <Star fill={selectedItem.data.favorite ? "currentColor" : "none"} />
+                        </button>
+                      </div>
+                      <span className="eyebrow">{labels[selectedItem.data.type]}</span>
+                      <h2>{selectedItem.data.title}</h2>
+                      {selectedItem.data.username && (
+                        <div className="field">
+                          <label>Username / identifier</label>
+                          <span>{selectedItem.data.username}</span>
+                          <button aria-label="Copy username" onClick={() => void copy(selectedItem.data.username)}>
+                            <Copy size={16} />
+                          </button>
+                        </div>
+                      )}
+                      {selectedItem.data.password && (
+                        <div className="field">
+                          <label>Password / secret</label>
+                          <span className="secret">{show ? selectedItem.data.password : "••••••••••••••••"}</span>
+                          <button aria-label="Toggle password visibility" onClick={() => setShow(!show)}>
+                            {show ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                          <button aria-label="Copy password" onClick={() => void copy(selectedItem.data.password)}>
+                            <Copy size={16} />
+                          </button>
+                        </div>
+                      )}
+                      {selectedItem.data.url && (
+                        <div className="field">
+                          <label>Website / service</label>
+                          <span>{selectedItem.data.url}</span>
+                        </div>
+                      )}
+                      {selectedItem.data.totp && (
+                        <div className="field">
+                          <label>Authenticator · {30 - (Math.floor(tick / 1000) % 30)}s</label>
+                          <span className="otp">{otp}</span>
+                          <button aria-label="Copy TOTP" onClick={() => void copy(otp)}>
+                            <Copy size={16} />
+                          </button>
+                        </div>
+                      )}
+                      {selectedItem.data.notes && (
+                        <div className="note">
+                          <label>Notes / custom fields</label>
+                          <p>{selectedItem.data.notes}</p>
+                        </div>
+                      )}
+                      <div className="tags">
+                        {selectedItem.data.tags
+                          .split(",")
+                          .filter(Boolean)
+                          .map((t) => (
+                            <span key={t}>{t.trim()}</span>
+                          ))}
+                      </div>
+                      <div className="actions">
+                        <button
+                          onClick={() => {
+                            setDraft({ ...selectedItem.data });
+                            setEditing(true);
+                          }}
+                        >
+                          Edit item
+                        </button>
+                        <button onClick={() => void run(() => save(selectedItem.data, selectedItem, !selectedItem.deleted))}>{selectedItem.deleted ? "Restore" : "Move to trash"}</button>
+                      </div>
+                      {selectedItem.deleted && (
+                        <button
+                          className="danger"
+                          onClick={() => {
+                            if (window.confirm("Permanently delete this item and its history?"))
+                              void run(async () => {
+                                await api(`/vaults/${vaultId.current}/items/${selectedItem.id}?expected_version=${selectedItem.version}`, "DELETE");
+                                setSelected(null);
+                                await sync();
+                              });
+                          }}
+                        >
+                          Delete permanently
+                        </button>
+                      )}
+                      <button
+                        className="text-button"
+                        onClick={() =>
+                          void run(async () => {
+                            const revisions = await api<{ version: number; payload: Envelope }[]>(`/vaults/${vaultId.current}/items/${selectedItem.id}/history`);
+                            setHistory(
+                              await Promise.all(
+                                revisions.map(async (r) => ({
+                                  version: r.version,
+                                  data: await decryptJSON<Data>(vaultKey.current!, r.payload, context("item", vaultId.current, selectedItem.id, r.version)),
+                                })),
+                              ),
+                            );
+                          })
+                        }
+                      >
+                        View encrypted revision history
+                      </button>
+                      {history.map((r) => (
+                        <button key={r.version} onClick={() => void run(() => save(r.data, selectedItem, selectedItem.deleted))}>
+                          Restore revision {r.version}
+                        </button>
+                      ))}
+                      {selectedItem.data.password && (
+                        <button
+                          className="text-button"
+                          onClick={() => {
+                            if (window.confirm("Send the first 5 characters of this password’s SHA-1 hash to Have I Been Pwned? Your IP is also visible to the service.")) void run(async () => notify(`Found in ${await breachCount(selectedItem.data.password)} breach records`));
+                          }}
+                        >
+                          Check password against breaches
+                        </button>
+                      )}
+                      <small className="detail-footer">
+                        <ShieldCheck size={14} />
+                        End-to-end encrypted · Revision {selectedItem.version}
+                      </small>
+                    </>
+                  ) : (
+                    <div className="empty">
+                      <ShieldCheck size={42} />
+                      <h3>A closer look, just for you.</h3>
+                      <p>Select an item to view its details.</p>
+                    </div>
+                  )}
+                </section>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+      {editing && (
+        <div className="modal-backdrop">
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="editor-title">
+            <div className="modal-heading">
+              <h2 id="editor-title">{selectedItem ? "Edit item" : "Add a new item"}</h2>
+              <button className="icon-button" aria-label="Close editor" onClick={() => setEditing(false)}>
+                <X />
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void run(() => save(draft, selectedItem, selectedItem?.deleted || false));
+              }}
+            >
+              <div className="form-grid">
+                <label>
+                  Item type
+                  <select value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })}>
+                    {Object.entries(labels).map(([k, v]) => (
+                      <option key={k} value={k}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Title
+                  <input autoFocus required maxLength={200} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+                </label>
+                <label>
+                  Username / identifier
+                  <input value={draft.username} onChange={(e) => setDraft({ ...draft, username: e.target.value })} />
+                </label>
+                <label>
+                  Password / secret
+                  <div className="input-action">
+                    <input type="password" value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} />
+                    <button type="button" aria-label="Generate password" onClick={() => setDraft({ ...draft, password: generate().password })}>
+                      <WandSparkles size={18} />
+                    </button>
+                  </div>
+                </label>
+                <label>
+                  Website / service
+                  <input value={draft.url} onChange={(e) => setDraft({ ...draft, url: e.target.value })} />
+                </label>
+                <label>
+                  Folder
+                  <input value={draft.folder} onChange={(e) => setDraft({ ...draft, folder: e.target.value })} />
+                </label>
+                <label>
+                  Tags, comma separated
+                  <input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} />
+                </label>
+                <label>
+                  TOTP seed (Base32)
+                  <input type="password" value={draft.totp} onChange={(e) => setDraft({ ...draft, totp: e.target.value })} />
+                </label>
+              </div>
+              <label>
+                Notes / additional fields
+                <textarea rows={5} placeholder="Card details, address, recovery codes, custom fields…" value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} />
+              </label>
+              <p className="hint">
+                <LockKeyhole size={14} />
+                Every field above is encrypted on this device.
+              </p>
+              {error && (
+                <p className="error" role="alert">
+                  {error}
+                </p>
+              )}
+              <button className="primary" disabled={busy}>
+                {busy ? "Encrypting…" : "Save encrypted item"}
+              </button>
+            </form>
+          </section>
+        </div>
+      )}
+    </main>
+  );
+}
