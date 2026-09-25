@@ -1291,6 +1291,63 @@ def change_team_role(
     return {"ok": True}
 
 
+@app.post("/team-invitations/{invitation_id}/decline")
+def decline_team_invitation(invitation_id: uuid.UUID, db: DB, device: Auth):
+    invitation = db.scalar(
+        select(TeamInvitation).where(TeamInvitation.id == invitation_id).with_for_update()
+    )
+    if invitation is None or invitation.recipient_id != device.user_id:
+        raise HTTPException(404, "Invitation not found")
+    if invitation.accepted or invitation.revoked or invitation.expires <= now():
+        raise HTTPException(409, "Invitation is no longer valid")
+    invitation.revoked = True
+    invitation.wrapped_key = ""
+    audit(db, device.user_id, "team_invitation_declined")
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/teams/{team_id}/transfer-ownership")
+def transfer_team_ownership(
+    team_id: uuid.UUID,
+    body: s.TeamOwnershipTransfer,
+    db: DB,
+    device: Auth,
+):
+    team, actor = team_access(db, team_id, device, lock=True)
+    if actor.role != "owner" or team.owner_id != device.user_id:
+        raise HTTPException(403, "Only the owner can transfer ownership")
+    active_rotation = db.scalar(
+        select(TeamRotationJob).where(
+            TeamRotationJob.team_id == team.id,
+            TeamRotationJob.expires > now(),
+        )
+    )
+    if active_rotation is not None:
+        raise HTTPException(409, "Finish or cancel key rotation before transferring ownership")
+    target = db.get(TeamMember, (team.id, body.target_id))
+    if target is None or target.user_id == actor.user_id:
+        raise HTTPException(404, "Member not found")
+    actor.role = "admin"
+    target.role = "owner"
+    team.owner_id = target.user_id
+    audit(db, device.user_id, "team_ownership_transferred")
+    audit(db, target.user_id, "team_ownership_received")
+    db.commit()
+    return {"owner_id": str(target.user_id)}
+
+
+@app.delete("/teams/{team_id}")
+def delete_team(team_id: uuid.UUID, db: DB, device: Auth):
+    team, actor = team_access(db, team_id, device, lock=True)
+    if actor.role != "owner" or team.owner_id != device.user_id:
+        raise HTTPException(403, "Only the owner can delete the team")
+    audit(db, device.user_id, "team_deleted")
+    db.delete(team)
+    db.commit()
+    return {"ok": True}
+
+
 @app.get("/teams/{team_id}/sync")
 def sync_team(team_id: uuid.UUID, db: DB, device: Auth, after: int = 0):
     team, _ = team_access(db, team_id, device, lock=True)
