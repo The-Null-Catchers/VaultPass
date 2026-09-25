@@ -204,11 +204,14 @@ export function TeamsPanel({
 
   useEffect(() => {
     let active = true;
-    void loadOverview().catch((value) => {
-      if (active) setError(value instanceof Error ? value.message : "Unable to load team vaults");
-    });
+    const timeout = window.setTimeout(() => {
+      void loadOverview().catch((value) => {
+        if (active) setError(value instanceof Error ? value.message : "Unable to load team vaults");
+      });
+    }, 0);
     return () => {
       active = false;
+      window.clearTimeout(timeout);
       teamKey.current?.fill(0);
       teamKey.current = null;
     };
