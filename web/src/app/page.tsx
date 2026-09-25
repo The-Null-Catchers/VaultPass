@@ -620,7 +620,7 @@ export default function Home() {
             </div>
           )}
           {section === "Teams" ? (
-            <TeamsPanel accountKey={accountKey.current!} userId={session.user_id} notify={notify} />
+            <TeamsPanel getAccountKey={() => accountKey.current!} userId={session.user_id} notify={notify} />
           ) : section === "Generator" ? (
             <section className="panel tool-panel">
               <div className="icon-box">
