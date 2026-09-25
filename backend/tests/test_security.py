@@ -614,9 +614,7 @@ def test_team_invitation_decline_ownership_transfer_and_delete(client):
     )
 
     declined_invitation = invite(invitee, "D")
-    declined = client.post(
-        f"/team-invitations/{declined_invitation}/decline", headers=invitee_auth
-    )
+    declined = client.post(f"/team-invitations/{declined_invitation}/decline", headers=invitee_auth)
     assert declined.status_code == 200, declined.text
     assert client.get("/team-invitations", headers=invitee_auth).json() == []
     assert (
