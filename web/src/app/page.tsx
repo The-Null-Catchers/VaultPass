@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ShieldCheck, LockKeyhole, Search, Plus, KeyRound, FileText, CreditCard, UserRound, Star, Trash2, WandSparkles, Activity, MonitorSmartphone, Settings, LogOut, Copy, Eye, EyeOff, Menu, X, RefreshCw, Download, Upload, Clock3, Code2 } from "lucide-react";
+import { ShieldCheck, LockKeyhole, Search, Plus, KeyRound, FileText, CreditCard, UserRound, Star, Trash2, WandSparkles, Activity, MonitorSmartphone, Settings, LogOut, Copy, Eye, EyeOff, Menu, X, RefreshCw, Download, Upload, Clock3, Code2, UsersRound } from "lucide-react";
 import { api, clearTokens, setTokens } from "../lib/api";
 import { Bundle, Envelope, PROFILE, context, createAccount, createRecovery, decryptJSON, derive, encryptJSON, open, rewrap, unlock, unlockRecovery } from "../lib/crypto";
 import { breachCount, generate, health } from "../lib/generator";
@@ -9,6 +9,7 @@ import { restoreBackup, validateItem } from "../lib/backup";
 import { totp } from "../lib/totp";
 import { authenticatePasskey, createPasskey } from "../lib/passkeys";
 import type { AuthenticationOptions, RegistrationOptions } from "../lib/passkeys";
+import { TeamsPanel } from "../components/TeamsPanel";
 type Data = {
   title: string;
   type: string;
@@ -97,6 +98,7 @@ const navigation = [
   { name: "Security", icon: Activity },
   { name: "Devices", icon: MonitorSmartphone },
   { name: "Sharing", icon: ShieldCheck },
+  { name: "Teams", icon: UsersRound },
   { name: "Settings", icon: Settings },
 ];
 const labels: Record<string, string> = {
@@ -568,7 +570,7 @@ export default function Home() {
             <Menu />
           </button>
           <span className="breadcrumb">
-            Personal vault <span>/</span> <strong>{section}</strong>
+            {section === "Teams" ? "Team vaults" : "Personal vault"} <span>/</span> <strong>{section}</strong>
           </span>
           <div className="top-actions">
             <span className="status">
@@ -589,18 +591,20 @@ export default function Home() {
               <h1>{section}</h1>
               <p>{section === "All items" ? "Everything important. Safely in one place." : "Protected with encryption. Accessible to you."}</p>
             </div>
-            <button
-              className="primary"
-              onClick={() => {
-                setSelected(null);
-                setDraft(blank());
-                setEditing(true);
-                setShow(false);
-              }}
-            >
-              <Plus size={18} />
-              Add item
-            </button>
+            {section !== "Teams" && (
+              <button
+                className="primary"
+                onClick={() => {
+                  setSelected(null);
+                  setDraft(blank());
+                  setEditing(true);
+                  setShow(false);
+                }}
+              >
+                <Plus size={18} />
+                Add item
+              </button>
+            )}
           </div>
           {error && (
             <div className="error" role="alert">
@@ -615,7 +619,9 @@ export default function Home() {
               {notice}
             </div>
           )}
-          {section === "Generator" ? (
+          {section === "Teams" ? (
+            <TeamsPanel accountKey={accountKey.current!} userId={session.user_id} notify={notify} />
+          ) : section === "Generator" ? (
             <section className="panel tool-panel">
               <div className="icon-box">
                 <WandSparkles />
