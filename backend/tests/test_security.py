@@ -567,6 +567,95 @@ def test_team_vault_roles_invitations_and_atomic_key_rotation(client):
     assert teams[0]["key_version"] == 2 and teams[0]["wrapped_key"] == "G" * 512
 
 
+def test_team_invitation_decline_ownership_transfer_and_delete(client):
+    owner, _, owner_auth = register(client, "lifecycle-owner@example.com")
+    successor, _, successor_auth = register(client, "lifecycle-successor@example.com")
+    invitee, _, invitee_auth = register(client, "lifecycle-invitee@example.com")
+    for body, auth in [
+        (owner, owner_auth),
+        (successor, successor_auth),
+        (invitee, invitee_auth),
+    ]:
+        enable_sharing(client, body, auth)
+
+    team_id = uuid.uuid4()
+    assert (
+        client.post(
+            "/teams",
+            headers=owner_auth,
+            json={"id": str(team_id), "name": "Lifecycle", "wrapped_key": "B" * 512},
+        ).status_code
+        == 201
+    )
+
+    def invite(recipient, wrapped):
+        invitation_id = uuid.uuid4()
+        response = client.post(
+            f"/teams/{team_id}/invitations",
+            headers=owner_auth,
+            json={
+                "id": str(invitation_id),
+                "recipient_id": recipient["id"],
+                "role": "member",
+                "wrapped_key": wrapped * 512,
+                "expected_key_version": 1,
+                "expires": int(time.time()) + 3600,
+            },
+        )
+        assert response.status_code == 201, response.text
+        return invitation_id
+
+    successor_invitation = invite(successor, "C")
+    assert (
+        client.post(
+            f"/team-invitations/{successor_invitation}/accept", headers=successor_auth
+        ).status_code
+        == 200
+    )
+
+    declined_invitation = invite(invitee, "D")
+    declined = client.post(
+        f"/team-invitations/{declined_invitation}/decline", headers=invitee_auth
+    )
+    assert declined.status_code == 200, declined.text
+    assert client.get("/team-invitations", headers=invitee_auth).json() == []
+    assert (
+        client.post(
+            f"/team-invitations/{declined_invitation}/accept", headers=invitee_auth
+        ).status_code
+        == 409
+    )
+
+    transfer_path = f"/teams/{team_id}/transfer-ownership"
+    assert (
+        client.post(
+            transfer_path,
+            headers=successor_auth,
+            json={"target_id": owner["id"]},
+        ).status_code
+        == 403
+    )
+    transferred = client.post(
+        transfer_path,
+        headers=owner_auth,
+        json={"target_id": successor["id"]},
+    )
+    assert transferred.status_code == 200, transferred.text
+    assert transferred.json()["owner_id"] == successor["id"]
+
+    old_owner_view = client.get("/teams", headers=owner_auth).json()[0]
+    new_owner_view = client.get("/teams", headers=successor_auth).json()[0]
+    assert old_owner_view["role"] == "admin"
+    assert new_owner_view["role"] == "owner"
+    assert new_owner_view["owner_id"] == successor["id"]
+
+    assert client.delete(f"/teams/{team_id}", headers=owner_auth).status_code == 403
+    deleted = client.delete(f"/teams/{team_id}", headers=successor_auth)
+    assert deleted.status_code == 200, deleted.text
+    assert client.get("/teams", headers=owner_auth).json() == []
+    assert client.get("/teams", headers=successor_auth).json() == []
+
+
 def test_trash_purge_tombstone_and_account_deletion(client):
     body, _, auth = register(client)
     path = f"/vaults/{body['vault_id']}/items/{uuid.uuid4()}"
