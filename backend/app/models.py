@@ -183,3 +183,117 @@ class Share(Base):
     expires: Mapped[int]
     revoked: Mapped[bool] = mapped_column(default=False)
     created: Mapped[int] = mapped_column(default=now)
+
+
+class Team(Base):
+    __tablename__ = "teams"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    key_version: Mapped[int] = mapped_column(Integer, default=1)
+    sequence: Mapped[int] = mapped_column(Integer, default=0)
+    created: Mapped[int] = mapped_column(default=now)
+
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    role: Mapped[str] = mapped_column(String(16))
+    wrapped_key: Mapped[str] = mapped_column(String(1024))
+    key_version: Mapped[int] = mapped_column(Integer)
+    joined: Mapped[int] = mapped_column(default=now)
+
+
+class TeamInvitation(Base):
+    __tablename__ = "team_invitations"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"), index=True
+    )
+    inviter_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    recipient_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(16))
+    wrapped_key: Mapped[str] = mapped_column(String(1024))
+    key_version: Mapped[int] = mapped_column(Integer)
+    expires: Mapped[int]
+    revoked: Mapped[bool] = mapped_column(default=False)
+    accepted: Mapped[bool] = mapped_column(default=False)
+    created: Mapped[int] = mapped_column(default=now)
+
+
+class TeamItem(Base):
+    __tablename__ = "team_items"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"), index=True
+    )
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    version: Mapped[int]
+    sequence: Mapped[int]
+    deleted: Mapped[bool] = mapped_column(default=False)
+    purged: Mapped[bool] = mapped_column(default=False)
+    updated: Mapped[int] = mapped_column(default=now)
+
+
+class TeamRevision(Base):
+    __tablename__ = "team_item_versions"
+    __table_args__ = (UniqueConstraint("item_id", "version"),)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uid)
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("team_items.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int]
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created: Mapped[int] = mapped_column(default=now)
+
+
+class TeamRotationJob(Base):
+    __tablename__ = "team_rotation_jobs"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"), unique=True
+    )
+    initiator_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    target_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    expected_key_version: Mapped[int] = mapped_column(Integer)
+    new_key_version: Mapped[int] = mapped_column(Integer)
+    expires: Mapped[int]
+    created: Mapped[int] = mapped_column(default=now)
+
+
+class TeamRotationMember(Base):
+    __tablename__ = "team_rotation_members"
+    rotation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("team_rotation_jobs.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    wrapped_key: Mapped[str] = mapped_column(String(1024))
+
+
+class TeamRotationItem(Base):
+    __tablename__ = "team_rotation_items"
+    rotation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("team_rotation_jobs.id", ondelete="CASCADE"), primary_key=True
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("team_items.id", ondelete="CASCADE"), primary_key=True
+    )
+    expected_version: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)

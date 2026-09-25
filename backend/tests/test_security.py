@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import time
 import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -35,6 +36,25 @@ def register(client, email="test@example.com"):
     result = client.post("/auth/register", json=body)
     assert result.status_code == 201, result.text
     return body, result.json(), {"Authorization": "Bearer " + result.json()["access_token"]}
+
+
+def enable_sharing(client, body, auth):
+    from app.db import db
+    from app.main import app
+    from app.models import User
+
+    session_generator = app.dependency_overrides[db]()
+    database = next(session_generator)
+    user = database.get(User, uuid.UUID(body["id"]))
+    user.verified = True
+    database.commit()
+    session_generator.close()
+    result = client.post(
+        "/sharing/keys",
+        headers=auth,
+        json={"public_key": "A" * 128, "private_key": envelope()},
+    )
+    assert result.status_code == 200, result.text
 
 
 def test_ownership_and_conflict(client):
@@ -326,6 +346,225 @@ def test_resource_caps_preserve_existing_access(client):
             headers=passkey_auth,
         )
     assert result.status_code == 409 and result.json()["detail"] == "Passkey limit reached"
+
+
+def test_team_vault_roles_invitations_and_atomic_key_rotation(client):
+    owner, _, owner_auth = register(client, "owner@example.com")
+    admin, _, admin_auth = register(client, "admin@example.com")
+    reader, _, reader_auth = register(client, "reader@example.com")
+    outsider, _, outsider_auth = register(client, "outsider@example.com")
+    for body, auth in [
+        (owner, owner_auth),
+        (admin, admin_auth),
+        (reader, reader_auth),
+        (outsider, outsider_auth),
+    ]:
+        enable_sharing(client, body, auth)
+
+    team_id = uuid.uuid4()
+    created = client.post(
+        "/teams",
+        headers=owner_auth,
+        json={"id": str(team_id), "name": "Engineering", "wrapped_key": "B" * 512},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["key_version"] == 1
+
+    def invite(body, role, wrapped):
+        invitation_id = uuid.uuid4()
+        response = client.post(
+            f"/teams/{team_id}/invitations",
+            headers=owner_auth,
+            json={
+                "id": str(invitation_id),
+                "recipient_id": body["id"],
+                "role": role,
+                "wrapped_key": wrapped * 512,
+                "expected_key_version": 1,
+                "expires": int(time.time()) + 3600,
+            },
+        )
+        assert response.status_code == 201, response.text
+        return invitation_id
+
+    admin_invitation = invite(admin, "admin", "C")
+    incoming = client.get("/team-invitations", headers=admin_auth).json()
+    assert incoming[0]["id"] == str(admin_invitation)
+    assert incoming[0]["wrapped_key"] == "C" * 512
+    assert (
+        client.post(f"/team-invitations/{admin_invitation}/accept", headers=admin_auth).status_code
+        == 200
+    )
+    reader_invitation = invite(reader, "read_only", "D")
+    assert (
+        client.post(
+            f"/team-invitations/{reader_invitation}/accept", headers=reader_auth
+        ).status_code
+        == 200
+    )
+    stale_invitation = invite(outsider, "member", "E")
+
+    members = client.get(f"/teams/{team_id}/members", headers=reader_auth)
+    assert members.status_code == 200
+    assert {row["role"] for row in members.json()} == {"owner", "admin", "read_only"}
+    assert {row["public_key"] for row in members.json()} == {"A" * 128}
+    assert client.get(f"/teams/{team_id}/members", headers=outsider_auth).status_code == 404
+    assert (
+        client.patch(
+            f"/teams/{team_id}/members/{reader['id']}",
+            headers=admin_auth,
+            json={"role": "admin"},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            f"/teams/{team_id}/invitations",
+            headers=admin_auth,
+            json={
+                "id": str(uuid.uuid4()),
+                "recipient_id": outsider["id"],
+                "role": "admin",
+                "wrapped_key": "H" * 512,
+                "expected_key_version": 1,
+                "expires": int(time.time()) + 3600,
+            },
+        ).status_code
+        == 403
+    )
+    managed_invitations = client.get(f"/teams/{team_id}/invitations", headers=owner_auth).json()
+    assert {row["id"] for row in managed_invitations} >= {str(stale_invitation)}
+
+    item_id = uuid.uuid4()
+    path = f"/teams/{team_id}/items/{item_id}"
+    first = {
+        "expected_key_version": 1,
+        "expected_version": 0,
+        "payload": envelope(),
+        "deleted": False,
+    }
+    assert client.put(path, headers=owner_auth, json=first).status_code == 200
+    assert client.put(path, headers=reader_auth, json=first).status_code == 403
+    second = {**first, "expected_version": 1, "payload": {**envelope(), "ciphertext": "Y" * 64}}
+    assert client.put(path, headers=admin_auth, json=second).status_code == 200
+    assert client.get(f"/teams/{team_id}/sync", headers=reader_auth).status_code == 200
+    assert client.get(f"/teams/{team_id}/sync", headers=outsider_auth).status_code == 404
+
+    cancelled_id = uuid.uuid4()
+    start_path = f"/teams/{team_id}/rotations"
+    start_body = {
+        "id": str(cancelled_id),
+        "target_id": reader["id"],
+        "expected_key_version": 1,
+    }
+    assert client.post(start_path, headers=owner_auth, json=start_body).status_code == 201
+    cancelled_path = f"{start_path}/{cancelled_id}"
+    assert client.delete(cancelled_path, headers=admin_auth).status_code == 404
+    assert client.delete(cancelled_path, headers=owner_auth).status_code == 200
+
+    expired_id = uuid.uuid4()
+    assert (
+        client.post(
+            start_path,
+            headers=owner_auth,
+            json={**start_body, "id": str(expired_id)},
+        ).status_code
+        == 201
+    )
+    from app.db import db
+    from app.main import app
+    from app.models import TeamRotationJob
+
+    session_generator = app.dependency_overrides[db]()
+    database = next(session_generator)
+    expired_job = database.get(TeamRotationJob, expired_id)
+    assert expired_job is not None
+    expired_job.expires = 0
+    database.commit()
+    session_generator.close()
+    assert client.get(f"{start_path}/{expired_id}", headers=owner_auth).status_code == 410
+
+    rotation_id = uuid.uuid4()
+    rotation_path = f"{start_path}/{rotation_id}"
+    started = client.post(
+        start_path,
+        headers=owner_auth,
+        json={**start_body, "id": str(rotation_id)},
+    )
+    assert started.status_code == 201 and started.json()["new_key_version"] == 2
+    assert (
+        client.post(
+            start_path,
+            headers=owner_auth,
+            json={**start_body, "id": str(uuid.uuid4())},
+        ).status_code
+        == 409
+    )
+    assert client.post(rotation_path + "/finalize", headers=owner_auth).status_code == 409
+    assert client.get(rotation_path, headers=admin_auth).status_code == 404
+
+    assert (
+        client.put(
+            rotation_path + f"/members/{owner['id']}",
+            headers=owner_auth,
+            json={"wrapped_key": "F" * 512},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.put(
+            rotation_path + f"/members/{admin['id']}",
+            headers=owner_auth,
+            json={"wrapped_key": "G" * 512},
+        ).status_code
+        == 200
+    )
+    status = client.get(rotation_path, headers=owner_auth).json()
+    assert status["expected_members"] == 2
+    assert len(status["staged_member_ids"]) == 2
+    assert status["expected_items"] == 1 and status["staged_items"] == []
+    staged_item_path = rotation_path + f"/items/{item_id}"
+    assert (
+        client.put(
+            staged_item_path,
+            headers=owner_auth,
+            json={"expected_version": 2, "payload": envelope()},
+        ).status_code
+        == 200
+    )
+
+    concurrent = {
+        **first,
+        "expected_version": 2,
+        "payload": {**envelope(), "ciphertext": "Z" * 64},
+    }
+    assert client.put(path, headers=admin_auth, json=concurrent).status_code == 200
+    assert client.post(rotation_path + "/finalize", headers=owner_auth).status_code == 409
+    assert client.get(f"/teams/{team_id}/sync", headers=reader_auth).status_code == 200
+    assert (
+        client.put(
+            staged_item_path,
+            headers=owner_auth,
+            json={"expected_version": 3, "payload": envelope()},
+        ).status_code
+        == 200
+    )
+    rotated = client.post(rotation_path + "/finalize", headers=owner_auth)
+    assert rotated.status_code == 200, rotated.text
+    assert rotated.json()["key_version"] == 2
+    assert client.get(rotation_path, headers=owner_auth).status_code == 404
+    assert client.get(f"/teams/{team_id}/sync", headers=reader_auth).status_code == 404
+    assert client.put(path, headers=admin_auth, json=second).status_code == 409
+    assert client.get(path + "/history", headers=owner_auth).json() == []
+    assert client.get("/team-invitations", headers=outsider_auth).json() == []
+    assert (
+        client.post(
+            f"/team-invitations/{stale_invitation}/accept", headers=outsider_auth
+        ).status_code
+        == 409
+    )
+    teams = client.get("/teams", headers=admin_auth).json()
+    assert teams[0]["key_version"] == 2 and teams[0]["wrapped_key"] == "G" * 512
 
 
 def test_trash_purge_tombstone_and_account_deletion(client):

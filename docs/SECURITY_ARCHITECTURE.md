@@ -37,6 +37,8 @@ Authenticated data is exact UTF-8:
 | Item revision | `vaultpass:v1:item:<vault UUID>:<item UUID>:<revision>` |
 | Sharing private key | `vaultpass:v1:sharing-private:<user UUID>` |
 | Shared snapshot | `vaultpass:v1:share:<share UUID>:<sender UUID>:<recipient UUID>` |
+| Team key (RSA-OAEP label) | `vaultpass:v1:team-key:<team UUID>:<member UUID>:<key epoch>` |
+| Team item | `vaultpass:v1:team-item:<team UUID>:<item UUID>:<key epoch>:<revision>` |
 | Recovery-wrapped account key | `vaultpass:v1:recovery:<SHA-256 recovery context>` |
 
 UUIDs use lower-case canonical representation; revisions are base-10 integers. Binding revision and object context prevents moving a ciphertext to another item/vault/revision. Full history rollback by a malicious server remains possible without external trusted checkpoints. Random GCM nonces have a nonzero collision probability; key rotation and per-key usage limits remain release-hardening work. Do not use one vault key for unbounded bulk encryption.
@@ -67,7 +69,17 @@ Web Crypto generates a per-user RSA-OAEP 3072-bit keypair with SHA-256. Public S
 
 A share is a read-only snapshot encrypted under a fresh 32-byte random key. That key is RSA-OAEP wrapped for the recipient, with label `vaultpass:v1:share-key:<share UUID>:<sender UUID>:<recipient UUID>`. Sender/recipient/share IDs are authenticated in the payload too. Expiry is 1–30 days at the API; UI defaults to 7. Both accounts must verify email. Before sending, compare SHA-256 of the SPKI with the recipient over a separately trusted channel. A checkbox records the user's confirmation, not an automated cryptographic identity guarantee. There is no key-transparency log or sender digital signature in v1. A compromised directory or malicious recipient can still affect authenticity; verify out of band.
 
-Revocation removes future ciphertext/key downloads and does not erase already saved plaintext or ciphertext/key material. The recipient may explicitly save a separate personal copy. Team membership, editable shared vaults and key rotation are not yet implemented.
+Revocation removes future ciphertext/key downloads and does not erase already saved plaintext or ciphertext/key material. The recipient may explicitly save a separate personal copy.
+
+### Team vaults
+
+A team has a client-generated random 256-bit key and a monotonically increasing key epoch. That key is RSA-OAEP wrapped separately for each member's immutable sharing public key; the server stores only the wrappers, roles and relationship metadata. Team item AES-GCM AAD binds team, item, key epoch and revision. The server enforces Owner, Admin, Member and Read-only roles on every team route. Only the owner may invite, promote or remove administrators.
+
+Invitations expire within seven days and carry a recipient-specific wrapper for the current epoch. Acceptance is serialized with team mutation. A key rotation invalidates every outstanding invitation, because its wrapper belongs to the old epoch.
+
+Removing a non-owner is deliberately inseparable from rotation. The initiating owner/admin opens a one-hour rotation job, then uploads each remaining member wrapper and each replacement item ciphertext independently, so request-size limits do not constrain the whole vault. Staging does not change membership or visible ciphertext. Finalization locks the team and job, requires the exact remaining membership and retained-item sets, rechecks the key epoch and every item revision, then advances the epoch, replaces wrappers/ciphertext, deletes old-key revision history, removes the member and revokes invitations in one transaction. Concurrent item edits make finalization fail until those items are restaged; an expired or cancelled job cascades all staged ciphertext.
+
+The backend can verify completeness, authorization and freshness but cannot prove that opaque client submissions contain the correct key or plaintext. Already copied old plaintext, ciphertext and keys cannot be revoked. Owner transfer, team deletion UX, web team management UI and mobile support remain unimplemented.
 
 ### TOTP and breach checks
 

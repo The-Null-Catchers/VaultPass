@@ -1,6 +1,6 @@
 # Threat model
 
-Assets: master passwords, account/vault keys, item plaintext, TOTP seeds, sharing private keys, bearer/refresh tokens, encrypted backups, account/device metadata.
+Assets: master passwords, account/personal/team vault keys, item plaintext, TOTP seeds, sharing private keys, bearer/refresh tokens, encrypted backups, account/device/team-membership metadata.
 
 Trust boundary: encryption/decryption runs in the client. The server/database/queue never need vault plaintext. Web delivery, the endpoint OS, cryptographic library supply chain and the unlocked client remain trusted.
 
@@ -22,6 +22,8 @@ Trust boundary: encryption/decryption runs in the client. The server/database/qu
 | Concurrent/offline writes | Expected revision + vault sequence + server lock; local pending queue | Conflicts require explicit action; offline revocation cannot erase cached data |
 | Sharing key substitution | SHA-256 fingerprint verified out of band before sending | No automated transparency infrastructure or signed sender identity |
 | Shared recipient retention | Expiry/revocation prevents future API downloads | Cannot retract viewed/copied material |
+| Removed team member | Removal atomically advances the key epoch, rewraps a fresh key for every remaining member, re-encrypts retained items, clears old revisions and revokes pending invitations | Cannot erase plaintext, ciphertext or old keys already copied by the removed member; a malicious authorized client can submit unusable ciphertext/wrappers |
+| Team privilege escalation | Membership is checked on every route; read-only cannot write; administrators cannot create, promote or remove administrators | Owner/admin clients can intentionally damage available ciphertext within their authorized scope; owner transfer is not implemented |
 | Dependency compromise | Locks, automated audits, CodeQL, no secret credentials in repo | Scans do not prove absence of malicious code; independent review required |
 | DoS | Bounded request streams, envelope bounds, Redis rate limits, trusted-host validation, paged sync, and per-vault item/passkey/session caps | Distributed account-targeted throttling and ciphertext-byte quotas still require deployment-specific controls |
 

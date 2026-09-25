@@ -2,7 +2,7 @@
 
 A privacy-focused password and secrets workspace with a Next.js web client, Flutter mobile client, and ciphertext-only FastAPI sync service.
 
-**Status: working personal-vault implementation, pre-release. Not independently audited or ready for production secrets.** Read [release readiness](docs/RELEASE_READINESS.md) for actual checks and the remaining product/security work. This repository does not claim that the full requested product roadmap is complete.
+**Status: working personal vault plus team-vault protocol foundation, pre-release. Not independently audited or ready for production secrets.** Read [release readiness](docs/RELEASE_READINESS.md) for actual checks and the remaining product/security work. This repository does not claim that the full requested product roadmap is complete.
 
 ## Implemented
 
@@ -13,6 +13,7 @@ A privacy-focused password and secrets workspace with a Next.js web client, Flut
 - Password generation, local short/reused-password checks, RFC 6238 TOTP, opt-in k-anonymity breach checking.
 - Encrypted JSON backup, local restore into a vault, local JSON import.
 - Recipient-encrypted read-only snapshots with expiry and revocation; fingerprint comparison is required before sending.
+- Zero-knowledge team-vault API with Owner/Admin/Member/Read-only authorization, seven-day invitations, editable ciphertext sync and atomic member-removal key rotation. Web cryptographic primitives and tests are present; team management UI and mobile support remain unfinished.
 - Responsive light/dark web application with local-only tokens, inactivity/background locking and nonce-based CSP.
 - Flutter online registration/login, encrypted offline cache and edit queue, conflict preservation, local search, TOTP, device management, Android device-authenticated key storage and screenshot protection.
 - PostgreSQL/Alembic, Redis rate limiting, bounded request/resource quotas, trusted-host enforcement, Celery transactional email and retention cleanup, Docker Compose, GitHub Actions, CodeQL, dependency scanning.
@@ -147,7 +148,7 @@ See [.env.example](.env.example) and [deployment guide](docs/DEPLOYMENT.md). Nev
 
 ## Demo and screenshots
 
-Import [the fake JSON template](docs/import-template.json) from web Settings. Every value is synthetic and marked as such. Screenshots should be made with this isolated demo account; never capture real vault data. The UI supports desktop/mobile layouts, dark mode, generator, security activity and device views. No team-vault screenshot is presented because team vaults are not implemented yet.
+Import [the fake JSON template](docs/import-template.json) from web Settings. Every value is synthetic and marked as such. Screenshots should be made with this isolated demo account; never capture real vault data. The UI supports desktop/mobile layouts, dark mode, generator, security activity and device views. No team-vault screenshot is presented because the management UI is not implemented yet.
 
 ## Security reporting
 

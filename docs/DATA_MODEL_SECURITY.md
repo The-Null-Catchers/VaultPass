@@ -29,6 +29,16 @@ All resource identifiers are UUIDs. Primary API reads authorize against the curr
 | shares.sender_id, recipient_id, expires, revoked | Sensitive relationship metadata | Access/expiry |
 | shares.wrapped_key | RSA-OAEP ciphertext | Recipient-wrapped snapshot key |
 | shares.payload | AES-GCM ciphertext | Shared snapshot |
+| teams.name, owner_id, key_version, sequence | Sensitive relationship/sync metadata | Team authorization and key epoch coordination |
+| team_members.user_id, role, joined | Sensitive relationship metadata | Server-enforced membership and role authorization |
+| team_members.wrapped_key | RSA-OAEP ciphertext | Current team key wrapped independently for that member |
+| team_invitations identifiers, role, expiry, state | Sensitive relationship metadata | Short-lived membership workflow and replay prevention |
+| team_invitations.wrapped_key | RSA-OAEP ciphertext, erased on use/revocation | Current team key wrapped for the intended recipient |
+| team_items.payload, team_item_versions.payload | AES-GCM ciphertext | Editable team-vault content and bounded history |
+| team_items version/sequence/deletion timestamps | Sensitive metadata | Conflict handling, trash and ordered sync |
+| team_rotation_jobs identifiers, actors, key versions, expiry | Sensitive security workflow metadata | Binds a resumable one-hour rotation to one team, initiator and removal target |
+| team_rotation_members.wrapped_key | Staged RSA-OAEP ciphertext | Next-epoch key wrapper; visible only through final application, never returned by status |
+| team_rotation_items.payload | Staged AES-GCM ciphertext | Next-revision replacement; atomically promoted only after full-set validation |
 
 No database field contains plaintext vault data. The protocol cannot prevent a deliberately malicious caller from placing arbitrary bytes in a ciphertext-shaped envelope. The first-party clients are responsible for encryption.
 

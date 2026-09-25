@@ -152,3 +152,47 @@ class Share(Strict):
     wrapped_key: str = Field(min_length=512, max_length=1024, pattern=r"^[A-Za-z0-9+/]+=*$")
     payload: Envelope
     expires: int
+
+
+TeamRole = Literal["admin", "member", "read_only"]
+
+
+class TeamCreate(Strict):
+    id: UUID
+    name: str = Field(min_length=1, max_length=80)
+    wrapped_key: str = Field(min_length=512, max_length=1024, pattern=r"^[A-Za-z0-9+/]+=*$")
+
+
+class TeamInvite(Strict):
+    id: UUID
+    recipient_id: UUID
+    role: TeamRole
+    wrapped_key: str = Field(min_length=512, max_length=1024, pattern=r"^[A-Za-z0-9+/]+=*$")
+    expected_key_version: int = Field(ge=1)
+    expires: int
+
+
+class TeamRoleChange(Strict):
+    role: TeamRole
+
+
+class TeamWrite(Strict):
+    expected_key_version: int = Field(ge=1)
+    expected_version: int = Field(ge=0)
+    payload: Envelope
+    deleted: bool = False
+
+
+class TeamRotationStart(Strict):
+    id: UUID
+    target_id: UUID
+    expected_key_version: int = Field(ge=1)
+
+
+class TeamRotationMember(Strict):
+    wrapped_key: str = Field(min_length=512, max_length=1024, pattern=r"^[A-Za-z0-9+/]+=*$")
+
+
+class TeamRotationItem(Strict):
+    expected_version: int = Field(ge=1)
+    payload: Envelope

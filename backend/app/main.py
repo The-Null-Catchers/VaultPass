@@ -44,6 +44,15 @@ from .models import (
     RecoveryKey,
     RefreshToken,
     Revision,
+    SharingKey,
+    Team,
+    TeamInvitation,
+    TeamItem,
+    TeamMember,
+    TeamRevision,
+    TeamRotationItem,
+    TeamRotationJob,
+    TeamRotationMember,
     User,
     Vault,
     Verification,
@@ -56,7 +65,7 @@ app = FastAPI(title="VaultPass ciphertext API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
@@ -226,6 +235,24 @@ def owned(db: Session, vault_id: uuid.UUID, device: DeviceSession, lock=False) -
     if vault is None:
         raise HTTPException(404, "Vault not found")
     return vault
+
+
+def team_access(
+    db: Session, team_id: uuid.UUID, device: DeviceSession, lock: bool = False
+) -> tuple[Team, TeamMember]:
+    query = select(Team).where(Team.id == team_id)
+    if lock:
+        query = query.with_for_update()
+    team = db.scalar(query)
+    membership = db.get(TeamMember, (team_id, device.user_id)) if team else None
+    if team is None or membership is None:
+        raise HTTPException(404, "Team not found")
+    return team, membership
+
+
+def require_team_admin(team: Team, membership: TeamMember):
+    if membership.role not in {"owner", "admin"}:
+        raise HTTPException(403, "Team administrator access required")
 
 
 @app.get("/health")
@@ -984,3 +1011,683 @@ def revoke_share(share_id: uuid.UUID, db: DB, device: Auth):
     audit(db, device.user_id, "share_revoked")
     db.commit()
     return {"ok": True}
+
+
+def serialize_team_item(item: TeamItem):
+    return {
+        "id": str(item.id),
+        "payload": item.payload,
+        "version": item.version,
+        "deleted": item.deleted,
+        "purged": item.purged,
+        "updated": item.updated,
+    }
+
+
+@app.post("/teams", status_code=201, dependencies=[Depends(rate_limit)])
+def create_team(body: s.TeamCreate, db: DB, device: Auth):
+    user = db.scalar(select(User).where(User.id == device.user_id).with_for_update())
+    if user is None or not user.verified or db.get(SharingKey, device.user_id) is None:
+        raise HTTPException(403, "Verify email and enable sharing first")
+    team_count = db.scalar(
+        select(func.count(TeamMember.team_id)).where(TeamMember.user_id == device.user_id)
+    )
+    if team_count is not None and team_count >= settings.max_teams_per_user:
+        raise HTTPException(409, "Team limit reached")
+    db.add(Team(id=body.id, name=body.name, owner_id=device.user_id))
+    db.add(
+        TeamMember(
+            team_id=body.id,
+            user_id=device.user_id,
+            role="owner",
+            wrapped_key=body.wrapped_key,
+            key_version=1,
+        )
+    )
+    audit(db, device.user_id, "team_created")
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Team already exists") from exc
+    return {"id": str(body.id), "key_version": 1}
+
+
+@app.get("/teams")
+def list_teams(db: DB, device: Auth):
+    rows = db.execute(
+        select(Team, TeamMember)
+        .join(TeamMember, TeamMember.team_id == Team.id)
+        .where(TeamMember.user_id == device.user_id)
+        .order_by(Team.created)
+    ).all()
+    return [
+        {
+            "id": str(team.id),
+            "name": team.name,
+            "owner_id": str(team.owner_id),
+            "role": membership.role,
+            "key_version": team.key_version,
+            "wrapped_key": membership.wrapped_key,
+            "created": team.created,
+        }
+        for team, membership in rows
+    ]
+
+
+@app.get("/teams/{team_id}/members")
+def list_team_members(team_id: uuid.UUID, db: DB, device: Auth):
+    team_access(db, team_id, device)
+    rows = db.execute(
+        select(TeamMember, User, SharingKey)
+        .join(User, User.id == TeamMember.user_id)
+        .outerjoin(SharingKey, SharingKey.user_id == TeamMember.user_id)
+        .where(TeamMember.team_id == team_id)
+        .order_by(TeamMember.joined)
+    ).all()
+    return [
+        {
+            "user_id": str(member.user_id),
+            "email": user.email,
+            "role": member.role,
+            "public_key": key.public_key if key else None,
+            "key_version": member.key_version,
+            "joined": member.joined,
+        }
+        for member, user, key in rows
+    ]
+
+
+@app.post("/teams/{team_id}/invitations", status_code=201, dependencies=[Depends(rate_limit)])
+def invite_team_member(team_id: uuid.UUID, body: s.TeamInvite, db: DB, device: Auth):
+    team, actor = team_access(db, team_id, device, lock=True)
+    require_team_admin(team, actor)
+    if body.role == "admin" and actor.role != "owner":
+        raise HTTPException(403, "Only the owner can invite administrators")
+    if body.expected_key_version != team.key_version:
+        raise HTTPException(409, "Team key changed; refresh before inviting")
+    recipient = db.get(User, body.recipient_id)
+    if recipient is None or not recipient.verified or db.get(SharingKey, body.recipient_id) is None:
+        raise HTTPException(400, "Recipient must verify email and enable sharing")
+    if db.get(TeamMember, (team.id, body.recipient_id)):
+        raise HTTPException(409, "Recipient is already a member")
+    if body.expires <= now() or body.expires > now() + 7 * 86400:
+        raise HTTPException(422, "Choose invitation expiry within 7 days")
+    active_members = db.scalar(
+        select(func.count(TeamMember.user_id)).where(TeamMember.team_id == team.id)
+    )
+    pending_recipients = set(
+        db.scalars(
+            select(TeamInvitation.recipient_id).where(
+                TeamInvitation.team_id == team.id,
+                TeamInvitation.accepted.is_(False),
+                TeamInvitation.revoked.is_(False),
+                TeamInvitation.expires > now(),
+            )
+        )
+    )
+    if body.recipient_id in pending_recipients:
+        raise HTTPException(409, "An active invitation already exists")
+    if (active_members or 0) + len(pending_recipients) >= settings.max_team_members:
+        raise HTTPException(409, "Team member limit reached")
+    db.add(
+        TeamInvitation(
+            id=body.id,
+            team_id=team.id,
+            inviter_id=device.user_id,
+            recipient_id=body.recipient_id,
+            role=body.role,
+            wrapped_key=body.wrapped_key,
+            key_version=team.key_version,
+            expires=body.expires,
+        )
+    )
+    audit(db, device.user_id, "team_invitation_created")
+    audit(db, body.recipient_id, "team_invitation_received")
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Invitation already exists") from exc
+    return {"ok": True}
+
+
+@app.get("/teams/{team_id}/invitations")
+def list_team_invitations(team_id: uuid.UUID, db: DB, device: Auth):
+    team, actor = team_access(db, team_id, device)
+    require_team_admin(team, actor)
+    return [
+        {
+            "id": str(invitation.id),
+            "recipient_id": str(invitation.recipient_id),
+            "role": invitation.role,
+            "key_version": invitation.key_version,
+            "expires": invitation.expires,
+            "revoked": invitation.revoked,
+            "accepted": invitation.accepted,
+            "created": invitation.created,
+        }
+        for invitation in db.scalars(
+            select(TeamInvitation)
+            .where(TeamInvitation.team_id == team.id)
+            .order_by(TeamInvitation.created.desc())
+            .limit(500)
+        )
+    ]
+
+
+@app.get("/team-invitations")
+def incoming_team_invitations(db: DB, device: Auth):
+    rows = db.execute(
+        select(TeamInvitation, Team)
+        .join(Team, Team.id == TeamInvitation.team_id)
+        .where(
+            TeamInvitation.recipient_id == device.user_id,
+            TeamInvitation.accepted.is_(False),
+            TeamInvitation.revoked.is_(False),
+            TeamInvitation.expires > now(),
+            TeamInvitation.key_version == Team.key_version,
+        )
+        .order_by(TeamInvitation.created.desc())
+    ).all()
+    return [
+        {
+            "id": str(invitation.id),
+            "team_id": str(team.id),
+            "team_name": team.name,
+            "inviter_id": str(invitation.inviter_id),
+            "role": invitation.role,
+            "wrapped_key": invitation.wrapped_key,
+            "key_version": invitation.key_version,
+            "expires": invitation.expires,
+        }
+        for invitation, team in rows
+    ]
+
+
+@app.post("/team-invitations/{invitation_id}/accept")
+def accept_team_invitation(invitation_id: uuid.UUID, db: DB, device: Auth):
+    candidate = db.get(TeamInvitation, invitation_id)
+    if candidate is None or candidate.recipient_id != device.user_id:
+        raise HTTPException(404, "Invitation not found")
+    team = db.scalar(select(Team).where(Team.id == candidate.team_id).with_for_update())
+    invitation = db.scalar(
+        select(TeamInvitation).where(TeamInvitation.id == invitation_id).with_for_update()
+    )
+    if (
+        team is None
+        or invitation is None
+        or invitation.recipient_id != device.user_id
+        or invitation.accepted
+        or invitation.revoked
+        or invitation.expires <= now()
+        or invitation.key_version != team.key_version
+    ):
+        raise HTTPException(409, "Invitation is no longer valid")
+    if db.get(TeamMember, (team.id, device.user_id)):
+        raise HTTPException(409, "Already a team member")
+    user = db.scalar(select(User).where(User.id == device.user_id).with_for_update())
+    if user is None:
+        raise HTTPException(404, "Invitation not found")
+    team_count = db.scalar(
+        select(func.count(TeamMember.team_id)).where(TeamMember.user_id == device.user_id)
+    )
+    if team_count is not None and team_count >= settings.max_teams_per_user:
+        raise HTTPException(409, "Team limit reached")
+    member_count = db.scalar(
+        select(func.count(TeamMember.user_id)).where(TeamMember.team_id == team.id)
+    )
+    if member_count is not None and member_count >= settings.max_team_members:
+        raise HTTPException(409, "Team member limit reached")
+    db.add(
+        TeamMember(
+            team_id=team.id,
+            user_id=device.user_id,
+            role=invitation.role,
+            wrapped_key=invitation.wrapped_key,
+            key_version=invitation.key_version,
+        )
+    )
+    invitation.accepted = True
+    invitation.wrapped_key = ""
+    audit(db, device.user_id, "team_invitation_accepted")
+    db.commit()
+    return {"team_id": str(team.id)}
+
+
+@app.delete("/teams/{team_id}/invitations/{invitation_id}")
+def revoke_team_invitation(team_id: uuid.UUID, invitation_id: uuid.UUID, db: DB, device: Auth):
+    team, actor = team_access(db, team_id, device, lock=True)
+    require_team_admin(team, actor)
+    invitation = db.get(TeamInvitation, invitation_id)
+    if invitation is None or invitation.team_id != team.id or invitation.accepted:
+        raise HTTPException(404, "Invitation not found")
+    invitation.revoked = True
+    invitation.wrapped_key = ""
+    audit(db, device.user_id, "team_invitation_revoked")
+    db.commit()
+    return {"ok": True}
+
+
+@app.patch("/teams/{team_id}/members/{user_id}")
+def change_team_role(
+    team_id: uuid.UUID,
+    user_id: uuid.UUID,
+    body: s.TeamRoleChange,
+    db: DB,
+    device: Auth,
+):
+    team, actor = team_access(db, team_id, device, lock=True)
+    require_team_admin(team, actor)
+    target = db.get(TeamMember, (team.id, user_id))
+    if target is None or target.role == "owner":
+        raise HTTPException(404, "Member not found")
+    if actor.role != "owner" and (target.role == "admin" or body.role == "admin"):
+        raise HTTPException(403, "Only the owner can manage administrators")
+    target.role = body.role
+    audit(db, device.user_id, "team_role_changed")
+    audit(db, user_id, "team_role_updated")
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/teams/{team_id}/sync")
+def sync_team(team_id: uuid.UUID, db: DB, device: Auth, after: int = 0):
+    team, _ = team_access(db, team_id, device, lock=True)
+    if after < 0 or after > team.sequence:
+        raise HTTPException(400, "Invalid sync cursor")
+    rows = list(
+        db.scalars(
+            select(TeamItem)
+            .where(TeamItem.team_id == team.id, TeamItem.sequence > after)
+            .order_by(TeamItem.sequence)
+            .limit(500)
+        )
+    )
+    cursor = rows[-1].sequence if rows else team.sequence
+    result = {
+        "cursor": cursor,
+        "has_more": cursor < team.sequence,
+        "key_version": team.key_version,
+        "items": [serialize_team_item(item) for item in rows],
+    }
+    db.commit()
+    return result
+
+
+@app.put("/teams/{team_id}/items/{item_id}")
+def write_team_item(
+    team_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: s.TeamWrite,
+    db: DB,
+    device: Auth,
+):
+    team, membership = team_access(db, team_id, device, lock=True)
+    if membership.role == "read_only":
+        raise HTTPException(403, "Read-only members cannot edit")
+    if body.expected_key_version != team.key_version:
+        raise HTTPException(409, "Team key changed; refresh and re-encrypt")
+    item = db.get(TeamItem, item_id)
+    if item and item.team_id != team.id:
+        raise HTTPException(404, "Item not found")
+    if (
+        item
+        and not item.purged
+        and item.version == body.expected_version + 1
+        and item.payload == body.payload.model_dump()
+        and item.deleted == body.deleted
+    ):
+        return serialize_team_item(item)
+    if (item.version if item else 0) != body.expected_version or (item and item.purged):
+        raise HTTPException(409, "Revision conflict; fetch remote and preserve your local edit")
+    if item is None:
+        item_count = db.scalar(select(func.count(TeamItem.id)).where(TeamItem.team_id == team.id))
+        if item_count is not None and item_count >= settings.max_vault_items:
+            raise HTTPException(409, "Team vault item limit reached")
+        item = TeamItem(id=item_id, team_id=team.id)
+        db.add(item)
+    else:
+        db.add(TeamRevision(item_id=item.id, version=item.version, payload=item.payload))
+    team.sequence += 1
+    item.payload = body.payload.model_dump()
+    item.deleted = body.deleted
+    item.version = body.expected_version + 1
+    item.sequence = team.sequence
+    item.updated = now()
+    db.flush()
+    old = list(
+        db.scalars(
+            select(TeamRevision)
+            .where(TeamRevision.item_id == item_id)
+            .order_by(TeamRevision.version.desc())
+            .offset(20)
+        )
+    )
+    for revision in old:
+        db.delete(revision)
+    db.commit()
+    return serialize_team_item(item)
+
+
+@app.get("/teams/{team_id}/items/{item_id}/history")
+def team_item_history(team_id: uuid.UUID, item_id: uuid.UUID, db: DB, device: Auth):
+    team_access(db, team_id, device)
+    item = db.get(TeamItem, item_id)
+    if item is None or item.team_id != team_id:
+        raise HTTPException(404, "Item not found")
+    return [
+        {"version": row.version, "payload": row.payload, "created": row.created}
+        for row in db.scalars(
+            select(TeamRevision)
+            .where(TeamRevision.item_id == item_id)
+            .order_by(TeamRevision.version.desc())
+        )
+    ]
+
+
+@app.delete("/teams/{team_id}/items/{item_id}")
+def purge_team_item(
+    team_id: uuid.UUID,
+    item_id: uuid.UUID,
+    expected_version: int,
+    expected_key_version: int,
+    db: DB,
+    device: Auth,
+):
+    team, membership = team_access(db, team_id, device, lock=True)
+    if membership.role == "read_only":
+        raise HTTPException(403, "Read-only members cannot edit")
+    if expected_key_version != team.key_version:
+        raise HTTPException(409, "Team key changed; refresh before editing")
+    item = db.get(TeamItem, item_id)
+    if item is None or item.team_id != team.id:
+        raise HTTPException(404, "Item not found")
+    if not item.deleted or item.version != expected_version:
+        raise HTTPException(409, "Trash revision conflict")
+    team.sequence += 1
+    item.payload = {}
+    item.purged = True
+    item.sequence = team.sequence
+    item.version += 1
+    item.updated = now()
+    db.execute(delete(TeamRevision).where(TeamRevision.item_id == item.id))
+    db.commit()
+    return {"ok": True}
+
+
+def rotation_job(
+    db: Session,
+    team_id: uuid.UUID,
+    rotation_id: uuid.UUID,
+    device: DeviceSession,
+    lock: bool = False,
+) -> TeamRotationJob:
+    query = select(TeamRotationJob).where(
+        TeamRotationJob.id == rotation_id,
+        TeamRotationJob.team_id == team_id,
+        TeamRotationJob.initiator_id == device.user_id,
+    )
+    if lock:
+        query = query.with_for_update()
+    job = db.scalar(query)
+    if job is None:
+        raise HTTPException(404, "Rotation not found")
+    if job.expires <= now():
+        raise HTTPException(410, "Rotation expired")
+    return job
+
+
+def validate_rotation_target(actor: TeamMember, target: TeamMember | None):
+    if target is None or target.role == "owner":
+        raise HTTPException(404, "Member not found")
+    if target.user_id == actor.user_id:
+        raise HTTPException(409, "Administrators cannot remove themselves")
+    if actor.role != "owner" and target.role == "admin":
+        raise HTTPException(403, "Only the owner can remove administrators")
+
+
+@app.post("/teams/{team_id}/rotations", status_code=201)
+def begin_team_rotation(
+    team_id: uuid.UUID,
+    body: s.TeamRotationStart,
+    db: DB,
+    device: Auth,
+):
+    team, actor = team_access(db, team_id, device, lock=True)
+    require_team_admin(team, actor)
+    target = db.get(TeamMember, (team.id, body.target_id))
+    validate_rotation_target(actor, target)
+    if body.expected_key_version != team.key_version:
+        raise HTTPException(409, "Team key changed; restart rotation")
+    existing = db.scalar(
+        select(TeamRotationJob).where(TeamRotationJob.team_id == team.id).with_for_update()
+    )
+    if existing is not None and existing.expires > now():
+        raise HTTPException(409, "A team key rotation is already in progress")
+    if existing is not None:
+        db.delete(existing)
+        db.flush()
+    job = TeamRotationJob(
+        id=body.id,
+        team_id=team.id,
+        initiator_id=device.user_id,
+        target_id=body.target_id,
+        expected_key_version=team.key_version,
+        new_key_version=team.key_version + 1,
+        expires=now() + 3600,
+    )
+    db.add(job)
+    audit(db, device.user_id, "team_key_rotation_started")
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Rotation already exists") from exc
+    return {
+        "id": str(job.id),
+        "new_key_version": job.new_key_version,
+        "expires": job.expires,
+    }
+
+
+@app.put("/teams/{team_id}/rotations/{rotation_id}/members/{user_id}")
+def stage_team_rotation_member(
+    team_id: uuid.UUID,
+    rotation_id: uuid.UUID,
+    user_id: uuid.UUID,
+    body: s.TeamRotationMember,
+    db: DB,
+    device: Auth,
+):
+    team, actor = team_access(db, team_id, device)
+    require_team_admin(team, actor)
+    job = rotation_job(db, team_id, rotation_id, device, lock=True)
+    member = db.get(TeamMember, (team.id, user_id))
+    if member is None or user_id == job.target_id:
+        raise HTTPException(404, "Remaining member not found")
+    if db.get(SharingKey, user_id) is None:
+        raise HTTPException(409, "Remaining member has no sharing identity")
+    staged = db.get(TeamRotationMember, (job.id, user_id))
+    if staged is None:
+        staged = TeamRotationMember(rotation_id=job.id, user_id=user_id)
+        db.add(staged)
+    staged.wrapped_key = body.wrapped_key
+    db.commit()
+    return {"ok": True}
+
+
+@app.put("/teams/{team_id}/rotations/{rotation_id}/items/{item_id}")
+def stage_team_rotation_item(
+    team_id: uuid.UUID,
+    rotation_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: s.TeamRotationItem,
+    db: DB,
+    device: Auth,
+):
+    team, actor = team_access(db, team_id, device)
+    require_team_admin(team, actor)
+    job = rotation_job(db, team_id, rotation_id, device, lock=True)
+    item = db.get(TeamItem, item_id)
+    if item is None or item.team_id != team.id or item.purged:
+        raise HTTPException(404, "Item not found")
+    if item.version != body.expected_version:
+        raise HTTPException(409, "Item changed; refresh before staging")
+    staged = db.get(TeamRotationItem, (job.id, item_id))
+    if staged is None:
+        staged = TeamRotationItem(rotation_id=job.id, item_id=item_id)
+        db.add(staged)
+    staged.expected_version = body.expected_version
+    staged.payload = body.payload.model_dump()
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/teams/{team_id}/rotations/{rotation_id}")
+def team_rotation_status(
+    team_id: uuid.UUID,
+    rotation_id: uuid.UUID,
+    db: DB,
+    device: Auth,
+):
+    team, actor = team_access(db, team_id, device)
+    require_team_admin(team, actor)
+    job = rotation_job(db, team_id, rotation_id, device)
+    member_ids = list(
+        db.scalars(
+            select(TeamRotationMember.user_id)
+            .where(TeamRotationMember.rotation_id == job.id)
+            .order_by(TeamRotationMember.user_id)
+        )
+    )
+    staged_items = db.execute(
+        select(TeamRotationItem.item_id, TeamRotationItem.expected_version)
+        .where(TeamRotationItem.rotation_id == job.id)
+        .order_by(TeamRotationItem.item_id)
+    ).all()
+    expected_members = db.scalar(
+        select(func.count(TeamMember.user_id)).where(
+            TeamMember.team_id == team.id,
+            TeamMember.user_id != job.target_id,
+        )
+    )
+    expected_items = db.scalar(
+        select(func.count(TeamItem.id)).where(
+            TeamItem.team_id == team.id,
+            TeamItem.purged.is_(False),
+        )
+    )
+    return {
+        "id": str(job.id),
+        "target_id": str(job.target_id),
+        "expected_key_version": job.expected_key_version,
+        "new_key_version": job.new_key_version,
+        "expires": job.expires,
+        "expected_members": expected_members or 0,
+        "staged_member_ids": [str(value) for value in member_ids],
+        "expected_items": expected_items or 0,
+        "staged_items": [
+            {"id": str(item_id), "expected_version": version} for item_id, version in staged_items
+        ],
+    }
+
+
+@app.delete("/teams/{team_id}/rotations/{rotation_id}")
+def cancel_team_rotation(
+    team_id: uuid.UUID,
+    rotation_id: uuid.UUID,
+    db: DB,
+    device: Auth,
+):
+    team, actor = team_access(db, team_id, device, lock=True)
+    require_team_admin(team, actor)
+    job = db.scalar(
+        select(TeamRotationJob)
+        .where(TeamRotationJob.id == rotation_id, TeamRotationJob.team_id == team.id)
+        .with_for_update()
+    )
+    if job is None or (job.initiator_id != device.user_id and actor.role != "owner"):
+        raise HTTPException(404, "Rotation not found")
+    db.delete(job)
+    audit(db, device.user_id, "team_key_rotation_cancelled")
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/teams/{team_id}/rotations/{rotation_id}/finalize")
+def finalize_team_rotation(
+    team_id: uuid.UUID,
+    rotation_id: uuid.UUID,
+    db: DB,
+    device: Auth,
+):
+    team, actor = team_access(db, team_id, device, lock=True)
+    require_team_admin(team, actor)
+    job = rotation_job(db, team_id, rotation_id, device, lock=True)
+    target = db.get(TeamMember, (team.id, job.target_id))
+    validate_rotation_target(actor, target)
+    if team.key_version != job.expected_key_version:
+        raise HTTPException(409, "Team key changed; restart rotation")
+    members = list(
+        db.scalars(select(TeamMember).where(TeamMember.team_id == team.id).with_for_update())
+    )
+    expected_members = {member.user_id for member in members if member.user_id != job.target_id}
+    staged_members = {
+        row.user_id: row
+        for row in db.scalars(
+            select(TeamRotationMember).where(TeamRotationMember.rotation_id == job.id)
+        )
+    }
+    if set(staged_members) != expected_members:
+        raise HTTPException(409, "Stage a wrapped key for every remaining member")
+    if any(db.get(SharingKey, member_id) is None for member_id in expected_members):
+        raise HTTPException(409, "A remaining member has no sharing identity")
+    items = list(
+        db.scalars(
+            select(TeamItem)
+            .where(TeamItem.team_id == team.id, TeamItem.purged.is_(False))
+            .with_for_update()
+        )
+    )
+    staged_items = {
+        row.item_id: row
+        for row in db.scalars(
+            select(TeamRotationItem).where(TeamRotationItem.rotation_id == job.id)
+        )
+    }
+    if set(staged_items) != {item.id for item in items}:
+        raise HTTPException(409, "Stage replacement ciphertext for every retained item")
+    if any(staged_items[item.id].expected_version != item.version for item in items):
+        raise HTTPException(409, "An item changed; restage current ciphertext")
+    for member in members:
+        if member.user_id != job.target_id:
+            member.wrapped_key = staged_members[member.user_id].wrapped_key
+            member.key_version = job.new_key_version
+    for item in items:
+        team.sequence += 1
+        item.payload = staged_items[item.id].payload
+        item.version += 1
+        item.sequence = team.sequence
+        item.updated = now()
+        db.execute(delete(TeamRevision).where(TeamRevision.item_id == item.id))
+    assert target is not None
+    db.delete(target)
+    pending = list(
+        db.scalars(
+            select(TeamInvitation).where(
+                TeamInvitation.team_id == team.id,
+                TeamInvitation.accepted.is_(False),
+                TeamInvitation.revoked.is_(False),
+            )
+        )
+    )
+    for invitation in pending:
+        invitation.revoked = True
+        invitation.wrapped_key = ""
+    team.key_version = job.new_key_version
+    db.delete(job)
+    audit(db, device.user_id, "team_member_removed_and_key_rotated")
+    audit(db, target.user_id, "team_membership_removed")
+    db.commit()
+    return {"ok": True, "key_version": team.key_version}

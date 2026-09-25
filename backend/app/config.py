@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     max_vault_items: int = Field(default=5000, ge=1, le=100000)
     max_active_sessions: int = Field(default=20, ge=1, le=1000)
     max_passkeys: int = Field(default=10, ge=1, le=100)
+    max_teams_per_user: int = Field(default=25, ge=1, le=1000)
+    max_team_members: int = Field(default=100, ge=2, le=1000)
     audit_retention_days: int = Field(default=365, ge=30, le=3650)
 
 

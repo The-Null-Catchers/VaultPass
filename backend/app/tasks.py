@@ -6,7 +6,15 @@ from sqlalchemy import delete
 
 from .config import settings
 from .db import SessionLocal
-from .models import Audit, DeviceSession, PasskeyChallenge, RecoveryAttempt, Verification, now
+from .models import (
+    Audit,
+    DeviceSession,
+    PasskeyChallenge,
+    RecoveryAttempt,
+    TeamRotationJob,
+    Verification,
+    now,
+)
 
 celery = Celery("vaultpass", broker=settings.redis_url)
 celery.conf.update(
@@ -40,6 +48,7 @@ def cleanup():
         session.execute(delete(Verification).where(Verification.expires < now()))
         session.execute(delete(RecoveryAttempt).where(RecoveryAttempt.expires < now()))
         session.execute(delete(PasskeyChallenge).where(PasskeyChallenge.expires < now()))
+        session.execute(delete(TeamRotationJob).where(TeamRotationJob.expires < now()))
         session.execute(delete(DeviceSession).where(DeviceSession.expires < now()))
         session.execute(
             delete(Audit).where(Audit.created < now() - settings.audit_retention_days * 86400)

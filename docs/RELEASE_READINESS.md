@@ -10,10 +10,10 @@ This section is updated with observed commands/results at handoff. CI definition
 
 Local checks executed successfully during implementation:
 
-- Backend authentication/passkey/recovery/authorization/revocation/trash/rate-limiter tests.
+- Backend authentication/passkey/recovery/authorization/revocation/trash/rate-limiter and team role/invitation/rotation tests.
 - Ruff and mypy checks.
 - SQLite Alembic upgrade/schema-drift check (not a PostgreSQL substitute).
-- Web crypto round trips, key/context/tamper rejection, password/recovery rewrap, RFC 6238 vectors, recipient sharing and generator tests.
+- Web crypto round trips, key/context/tamper rejection, password/recovery rewrap, RFC 6238 vectors, recipient/team sharing and generator tests.
 - Web TypeScript, ESLint, production build and browser end-to-end flow in CI.
 - npm runtime dependency audit: no reported vulnerabilities at that scan.
 - Flutter analyzer, crypto/TOTP/generator and locked-state widget tests.
@@ -35,14 +35,16 @@ Cross-client interoperability, encrypted backup restore, mobile offline-queue te
 - Permanent deletion retains only sync tombstones; account deletion cascades.
 - Recovery keys are generated and used client-side; recovery proofs and five-minute reset tokens are one-time and successful recovery revokes all sessions.
 - Passkey MFA uses purpose-bound five-minute WebAuthn challenges, requires authenticator user verification, and issues no session after the password proof until the assertion succeeds.
+- Team vault access is membership-checked server-side; read-only members cannot mutate ciphertext and only the owner can create/manage administrators.
+- Member removal uses bounded staged uploads followed by an atomic finalize that increments the key epoch, requires a fresh wrapper for every remaining member and current ciphertext for every retained item, removes old revision ciphertext and invalidates outstanding invitations.
 
 ## Remaining implementation and release gates
 
 1. Independent cryptographic/security review; full threat-driven penetration testing; physical Android key invalidation/biometric/background/clipboard tests and iOS Keychain behavior.
-2. Organizations/team vaults, invitations/roles, editable sharing and membership key rotation.
+2. Complete the team-vault product surface: web management/switching/conflict UX, owner transfer/team deletion, mobile support and browser E2E. The ciphertext API, roles, invitations, editable sync and staged atomic removal rotation are implemented but not independently reviewed.
 3. iOS biometric unlock, mobile passkey/enrollment UX, mobile sharing/import/export/account-settings parity, QR TOTP scanning, comprehensive Flutter integration tests and offline crash/multi-device device tests.
 4. Encrypted attachments, dedicated structured card/identity forms, CSV/provider adapters, passphrase generator, richer password age/MFA/duplicate analysis, recent/archive sections.
-5. Ciphertext-byte quotas, GCM per-key usage limits/key rotation, account-targeted throttling, edge proxy limits, automated trash/expired-share retention and security notification preferences/new-device emails. Initial request, item, active-session and passkey caps are implemented but still need production tuning.
+5. Ciphertext-byte quotas, automatic personal-vault GCM key rotation, account-targeted throttling, edge proxy limits, automated trash/expired-share retention and security notification preferences/new-device emails. Initial request, item, team/member, active-session and passkey caps are implemented but still need production tuning.
 6. Tamper-evident external audit storage, abuse/admin operations UI and operational monitoring/alerting/runbooks.
 7. Complete browser E2E/accessibility/visual regression coverage, physical cross-platform passkey testing, PostgreSQL concurrency tests, clean-install/backup restoration drills, real email delivery checks.
 8. A configured HTTPS test/production endpoint, production Android signing and iOS signing. Default Android CI URL is intentionally non-routable unless configured.
