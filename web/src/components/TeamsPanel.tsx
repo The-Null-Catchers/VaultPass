@@ -80,16 +80,17 @@ const emptyItem = (): TeamItemData => ({
 });
 
 export function TeamsPanel({
-  accountKey,
+  getAccountKey,
   userId,
   notify,
 }: {
-  accountKey: Uint8Array;
+  getAccountKey: () => Uint8Array;
   userId: string;
   notify: (message: string) => void;
 }) {
   const teamKey = useRef<Uint8Array | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [hasTeamKey, setHasTeamKey] = useState(false);
   const [incoming, setIncoming] = useState<IncomingInvitation[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
@@ -144,7 +145,7 @@ export function TeamsPanel({
       const sharing = knownIdentity ?? identity ?? (await api<SharingIdentity>("/sharing/keys"));
       const nextKey = await unwrapTeamKey(
         team.wrapped_key,
-        accountKey,
+        getAccountKey(),
         sharing.private_key,
         team.id,
         userId,
@@ -152,6 +153,7 @@ export function TeamsPanel({
       );
       teamKey.current?.fill(0);
       teamKey.current = nextKey;
+      setHasTeamKey(true);
       setSelectedId(team.id);
 
       const [memberRows, invitationRows] = await Promise.all([
@@ -197,12 +199,16 @@ export function TeamsPanel({
       }
       setRows(decrypted.sort((a, b) => b.updated - a.updated));
     },
-    [accountKey, identity, userId],
+    [getAccountKey, identity, userId],
   );
 
   useEffect(() => {
-    void run(loadOverview);
+    let active = true;
+    void loadOverview().catch((value) => {
+      if (active) setError(value instanceof Error ? value.message : "Unable to load team vaults");
+    });
     return () => {
+      active = false;
       teamKey.current?.fill(0);
       teamKey.current = null;
     };
@@ -217,6 +223,7 @@ export function TeamsPanel({
     else {
       teamKey.current?.fill(0);
       teamKey.current = null;
+      setHasTeamKey(false);
       setSelectedId("");
       setMembers([]);
       setInvitations([]);
@@ -383,7 +390,7 @@ export function TeamsPanel({
         ))}
       </section>
 
-      {selected && teamKey.current && (
+      {selected && hasTeamKey && (
         <>
           <section className="panel">
             <h2>{selected.name}</h2>
@@ -572,6 +579,7 @@ export function TeamsPanel({
                 setMembers([]);
                 teamKey.current?.fill(0);
                 teamKey.current = null;
+                setHasTeamKey(false);
                 notify("Team vault deleted");
               })}>Delete team vault</button>
             </section>
