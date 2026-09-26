@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:pointycastle/asn1.dart' as asn1;
 import 'package:pointycastle/export.dart' as pc;
 
 import 'vault_crypto.dart';
@@ -113,21 +114,21 @@ Uint8List _oaepDecode(
 
 pc.RSAPublicKey _publicKey(String encoded) {
   final top =
-      pc.ASN1Parser(Uint8List.fromList(base64Decode(encoded))).nextObject()
-          as pc.ASN1Sequence;
-  final bitString = top.elements?[1] as pc.ASN1BitString?;
+      asn1.ASN1Parser(Uint8List.fromList(base64Decode(encoded))).nextObject()
+          as asn1.ASN1Sequence;
+  final bitString = top.elements?[1] as asn1.ASN1BitString?;
   if (bitString?.stringValues == null) {
     throw const FormatException('Invalid SPKI public key');
   }
   final rsa =
-      pc.ASN1Parser(Uint8List.fromList(bitString!.stringValues!)).nextObject()
-          as pc.ASN1Sequence;
+      asn1.ASN1Parser(Uint8List.fromList(bitString!.stringValues!)).nextObject()
+          as asn1.ASN1Sequence;
   final values = rsa.elements;
   if (values == null || values.length != 2) {
     throw const FormatException('Invalid RSA public key');
   }
-  final n = (values[0] as pc.ASN1Integer).integer;
-  final e = (values[1] as pc.ASN1Integer).integer;
+  final n = (values[0] as asn1.ASN1Integer).integer;
+  final e = (values[1] as asn1.ASN1Integer).integer;
   if (n == null || e == null) {
     throw const FormatException('Invalid RSA public key');
   }
@@ -135,27 +136,26 @@ pc.RSAPublicKey _publicKey(String encoded) {
 }
 
 pc.RSAPrivateKey _privateKey(Uint8List encoded) {
-  final top = pc.ASN1Parser(encoded).nextObject() as pc.ASN1Sequence;
-  final octets = top.elements?[2] as pc.ASN1OctetString?;
+  final top = asn1.ASN1Parser(encoded).nextObject() as asn1.ASN1Sequence;
+  final octets = top.elements?[2] as asn1.ASN1OctetString?;
   if (octets?.octets == null) {
     throw const FormatException('Invalid PKCS8 key');
   }
   final rsa =
-      pc.ASN1Parser(Uint8List.fromList(octets!.octets!)).nextObject()
-          as pc.ASN1Sequence;
+      asn1.ASN1Parser(Uint8List.fromList(octets!.octets!)).nextObject()
+          as asn1.ASN1Sequence;
   final values = rsa.elements;
   if (values == null || values.length < 6) {
     throw const FormatException('Invalid RSA private key');
   }
-  final n = (values[1] as pc.ASN1Integer).integer;
-  final e = (values[2] as pc.ASN1Integer).integer;
-  final d = (values[3] as pc.ASN1Integer).integer;
-  final p = (values[4] as pc.ASN1Integer).integer;
-  final q = (values[5] as pc.ASN1Integer).integer;
-  if ([n, e, d, p, q].any((value) => value == null)) {
+  final n = (values[1] as asn1.ASN1Integer).integer;
+  final d = (values[3] as asn1.ASN1Integer).integer;
+  final p = (values[4] as asn1.ASN1Integer).integer;
+  final q = (values[5] as asn1.ASN1Integer).integer;
+  if ([n, d, p, q].any((value) => value == null)) {
     throw const FormatException('Invalid RSA private key');
   }
-  return pc.RSAPrivateKey(n!, d!, p, q, e);
+  return pc.RSAPrivateKey(n!, d!, p, q);
 }
 
 Uint8List _teamKeyLabel(String teamId, String userId, int keyVersion) =>
