@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { test, expect } from "@playwright/test";
 
 test("team vault keeps item plaintext client-side", async ({ page }) => {
@@ -29,6 +30,15 @@ test("team vault keeps item plaintext client-side", async ({ page }) => {
   await page.getByLabel("Master password", { exact: true }).fill(master);
   await page.getByRole("button", { name: "Create encrypted vault", exact: true }).click();
   await expect(page.getByRole("heading", { name: "All items", exact: true })).toBeVisible();
+
+  // Team creation intentionally requires a verified account. The E2E backend uses an
+  // isolated SQLite database, so satisfy that prerequisite in test state without
+  // adding any verification bypass to the production API.
+  execFileSync("python", [
+    "-c",
+    "import sqlite3,sys; db=sqlite3.connect('/tmp/vaultpass-e2e.db'); db.execute('update users set verified=1 where email=?',(sys.argv[1],)); db.commit(); db.close()",
+    email,
+  ]);
 
   await page.getByRole("button", { name: "Sharing", exact: true }).click();
   const sharingError = page.locator(".error[role=alert]");
