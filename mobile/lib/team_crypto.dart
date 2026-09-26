@@ -46,7 +46,9 @@ Uint8List _rsa(
   required bool encrypt,
 }) {
   final size = _modulusBytes(key);
-  if (size < 256 || size > 512) {\n    throw const FormatException('Unsupported RSA key size');\n  }
+  if (size < 256 || size > 512) {
+    throw const FormatException('Unsupported RSA key size');
+  }
   final engine = pc.RSAEngine()
     ..init(
       encrypt,
@@ -132,14 +134,18 @@ pc.RSAPublicKey _publicKey(String encoded) {
   }
   final n = (values[0] as pc.ASN1Integer).integer;
   final e = (values[1] as pc.ASN1Integer).integer;
-  if (n == null || e == null) {\n    throw const FormatException('Invalid RSA public key');\n  }
+  if (n == null || e == null) {
+    throw const FormatException('Invalid RSA public key');
+  }
   return pc.RSAPublicKey(n, e);
 }
 
 pc.RSAPrivateKey _privateKey(Uint8List encoded) {
   final top = pc.ASN1Parser(encoded).nextObject() as pc.ASN1Sequence;
   final octets = top.elements?[2] as pc.ASN1OctetString?;
-  if (octets?.octets == null) {\n    throw const FormatException('Invalid PKCS8 key');\n  }
+  if (octets?.octets == null) {
+    throw const FormatException('Invalid PKCS8 key');
+  }
   final rsa =
       pc.ASN1Parser(Uint8List.fromList(octets!.octets!)).nextObject()
           as pc.ASN1Sequence;
