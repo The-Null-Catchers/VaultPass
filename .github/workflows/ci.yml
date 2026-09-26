@@ -84,9 +84,9 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: |
-          dart format mobile/lib/team_crypto.dart mobile/test/team_crypto_test.dart
-          git diff -- mobile/lib/team_crypto.dart mobile/test/team_crypto_test.dart
-          git diff --exit-code -- mobile/lib/team_crypto.dart mobile/test/team_crypto_test.dart
+          dart format lib/team_crypto.dart test/team_crypto_test.dart
+          git diff -- lib/team_crypto.dart test/team_crypto_test.dart
+          git diff --exit-code -- lib/team_crypto.dart test/team_crypto_test.dart
       - run: flutter analyze && flutter test
       - name: Build test APK and unsigned release AAB
         env:
