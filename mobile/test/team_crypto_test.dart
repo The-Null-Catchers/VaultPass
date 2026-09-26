@@ -17,50 +17,35 @@ void main() {
   const wrapped = 'M5kpQ0ux0W4MhluuBckjMrJBtoA2tjc+oqLHprnLBxDPwfLqWWKePP053raEqdPhFXUn5HEjUfchQZaDnGf78976mCbiP60PEsyDv1wSETSuD0YR9I6pmTrK2XplqxG/abvesKAEm5XF0hSZzVG9OJb7fsE4ZnZVUnqnYyKLsXsNOZDtKbAGwZ7bhdx/7wxzWOZQSGB9CW70emtkNfvqa+yk5Q24UEYHHwFWonGgU4axA2O0CASDaxCxcyVHB8QoejItRws4hwdHsuA4X/OaiJBC7MyDSB1QkmiJ/U9fi45+KmcA8H2qPxpAc2lBm4ZXe61cguH1Mc8ftU6ct4Axkrp/T5iKXGjuRDJruZhlYwU/TKUEkGw/j9kBKz7sOogQYCSwT1jTY4CMA1ZBhNGInUt+5/oQLl8v8aDsG6bs9X2mhz3OXePgCIMwItD4fopJt7yhjyBalbAQJcwbVsmNYeDKMolZGrpm3yQR3WCs0DME1fujSz/TpFq5l0fVuLoE';
   // dart format on
 
-  test(
-    'unwraps a browser-compatible RSA-OAEP-SHA256 team key label',
-    () async {
-      final accountKey = Uint8List.fromList(
-        List.generate(32, (i) => 255 - i),
-      );
-      final privateEnvelope = await seal(
-        accountKey,
-        base64Decode(privateKey),
-        aad('sharing-private', [userId]),
-      );
-      final result = await unwrapTeamKey(
-        wrapped,
-        accountKey,
-        privateEnvelope,
-        teamId,
-        userId,
-        7,
-      );
-      expect(result, Uint8List.fromList(List.generate(32, (i) => i)));
-    },
-  );
+  test('unwraps a browser-compatible RSA-OAEP-SHA256 team key label', () async {
+    final accountKey = Uint8List.fromList(List.generate(32, (i) => 255 - i));
+    final privateEnvelope = await seal(
+      accountKey,
+      base64Decode(privateKey),
+      aad('sharing-private', [userId]),
+    );
+    final result = await unwrapTeamKey(
+      wrapped,
+      accountKey,
+      privateEnvelope,
+      teamId,
+      userId,
+      7,
+    );
+    expect(result, Uint8List.fromList(List.generate(32, (i) => i)));
+  });
 
   test(
     'wrap and unwrap preserve the team key and reject wrong context',
     () async {
-      final accountKey = Uint8List.fromList(
-        List.generate(32, (i) => i + 1),
-      );
+      final accountKey = Uint8List.fromList(List.generate(32, (i) => i + 1));
       final privateEnvelope = await seal(
         accountKey,
         base64Decode(privateKey),
         aad('sharing-private', [userId]),
       );
-      final teamKey = Uint8List.fromList(
-        List.generate(32, (i) => i * 3 % 256),
-      );
-      final value = await wrapTeamKey(
-        teamKey,
-        publicKey,
-        teamId,
-        userId,
-        7,
-      );
+      final teamKey = Uint8List.fromList(List.generate(32, (i) => i * 3 % 256));
+      final value = await wrapTeamKey(teamKey, publicKey, teamId, userId, 7);
       expect(
         await unwrapTeamKey(
           value,
@@ -73,14 +58,7 @@ void main() {
         teamKey,
       );
       await expectLater(
-        unwrapTeamKey(
-          value,
-          accountKey,
-          privateEnvelope,
-          teamId,
-          userId,
-          8,
-        ),
+        unwrapTeamKey(value, accountKey, privateEnvelope, teamId, userId, 8),
         throwsA(isA<FormatException>()),
       );
     },
