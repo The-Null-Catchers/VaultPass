@@ -12,9 +12,7 @@ Uint8List _sha256(List<int> input) =>
 
 Uint8List _xor(List<int> a, List<int> b) {
   if (a.length != b.length) throw const FormatException('Invalid OAEP mask');
-  return Uint8List.fromList([
-    for (var i = 0; i < a.length; i++) a[i] ^ b[i],
-  ]);
+  return Uint8List.fromList([for (var i = 0; i < a.length; i++) a[i] ^ b[i]]);
 }
 
 Uint8List _mgf1(List<int> seed, int length) {
@@ -59,11 +57,7 @@ Uint8List _rsa(
   return _normalizedRsaBlock(engine.process(input), size);
 }
 
-Uint8List _oaepEncode(
-  Uint8List message,
-  pc.RSAPublicKey key,
-  Uint8List label,
-) {
+Uint8List _oaepEncode(Uint8List message, pc.RSAPublicKey key, Uint8List label) {
   final k = _modulusBytes(key);
   if (message.length > k - 2 * _hashLength - 2) {
     throw const FormatException('RSA-OAEP message is too long');
@@ -230,12 +224,11 @@ Future<Map<String, dynamic>> encryptTeamItem(
   String itemId,
   int keyVersion,
   int itemVersion,
-) =>
-    encryptJson(
-      key,
-      value,
-      aad('team-item', [teamId, itemId, keyVersion, itemVersion]),
-    );
+) => encryptJson(
+  key,
+  value,
+  aad('team-item', [teamId, itemId, keyVersion, itemVersion]),
+);
 
 Future<Map<String, dynamic>> decryptTeamItem(
   Uint8List key,
@@ -244,9 +237,8 @@ Future<Map<String, dynamic>> decryptTeamItem(
   String itemId,
   int keyVersion,
   int itemVersion,
-) =>
-    decryptJson(
-      key,
-      envelope,
-      aad('team-item', [teamId, itemId, keyVersion, itemVersion]),
-    );
+) => decryptJson(
+  key,
+  envelope,
+  aad('team-item', [teamId, itemId, keyVersion, itemVersion]),
+);
