@@ -18,7 +18,7 @@ Local checks executed successfully during implementation:
 - npm runtime dependency audit: no reported vulnerabilities at that scan.
 - Flutter analyzer, crypto/TOTP/generator and locked-state widget tests.
 
-Cross-client interoperability, encrypted backup restore, mobile offline-queue tests, PostgreSQL migrations, Docker clean-start, Android builds and CodeQL passed in GitHub Actions run `35480633523` / CodeQL run `35480633519`. Physical biometric, real iOS, full mobile offline device testing and external penetration tests have not run.
+Cross-client interoperability, encrypted backup restore, mobile offline-queue tests, PostgreSQL migrations, Docker clean-start, Android builds and CodeQL passed in GitHub Actions run `35480633523` / CodeQL run `35480633519`. Physical biometric, real iOS, full mobile offline device testing and external penetration tests have not run. The mobile dependency baseline upgrades from flutter_secure_storage 10.3.4 to 11.2.0 only after already being on v10; automated analyzer/tests/builds must pass on current HEAD, but physical upgrade/invalidation behavior remains a release gate.
 
 ## Implemented security review observations
 
