@@ -18,7 +18,7 @@ Local checks executed successfully during implementation:
 - npm runtime dependency audit: no reported vulnerabilities at that scan.
 - Flutter analyzer, crypto/TOTP/generator and locked-state widget tests.
 
-Cross-client interoperability, encrypted backup restore, mobile offline-queue tests, PostgreSQL migrations, Docker clean-start, Android builds and CodeQL passed in GitHub Actions run `35480633523` / CodeQL run `35480633519`. Physical biometric, real iOS, full mobile offline device testing and external penetration tests have not run. The mobile dependency baseline upgrades from flutter_secure_storage 10.3.4 to 11.2.0 only after already being on v10; automated analyzer/tests/builds must pass on current HEAD, but physical upgrade/invalidation behavior remains a release gate.
+Cross-client interoperability, encrypted backup restore, mobile offline-queue tests, PostgreSQL migrations, Docker clean-start, Android builds and CodeQL passed in GitHub Actions run `35480633523` / CodeQL run `35480633519`. Physical biometric, real iOS, full mobile offline device testing and external penetration tests have not run.
 
 ## Implemented security review observations
 
@@ -41,7 +41,7 @@ Cross-client interoperability, encrypted backup restore, mobile offline-queue te
 ## Remaining implementation and release gates
 
 1. Independent cryptographic/security review; full threat-driven penetration testing; physical Android key invalidation/biometric/background/clipboard tests and iOS Keychain behavior.
-2. Complete the team-vault product surface: web management/switching/conflict UX, safe self-leave flow, mobile support and browser E2E. Backend invitation decline, owner transfer and owner-only team deletion are implemented alongside the ciphertext API, roles, invitations, editable sync and staged atomic removal rotation, but the overall team surface is not independently reviewed.
+2. Complete the team-vault product surface: the first web management/switching surface is implemented for creation, encrypted item editing, invitations, roles, owner transfer/deletion and client-driven member-removal rekey. Safe self-leave, richer conflict/rekey recovery UX, mobile support and dedicated browser E2E/accessibility coverage remain. The overall team surface is not independently reviewed.
 3. iOS biometric unlock, mobile passkey/enrollment UX, mobile sharing/import/export/account-settings parity, QR TOTP scanning, comprehensive Flutter integration tests and offline crash/multi-device device tests.
 4. Encrypted attachments, dedicated structured card/identity forms, CSV/provider adapters, passphrase generator, richer password age/MFA/duplicate analysis, recent/archive sections.
 5. Ciphertext-byte quotas, automatic personal-vault GCM key rotation, account-targeted throttling, edge proxy limits, automated trash/expired-share retention and security notification preferences/new-device emails. Initial request, item, team/member, active-session and passkey caps are implemented but still need production tuning.

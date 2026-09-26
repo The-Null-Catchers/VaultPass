@@ -13,7 +13,7 @@ A privacy-focused password and secrets workspace with a Next.js web client, Flut
 - Password generation, local short/reused-password checks, RFC 6238 TOTP, opt-in k-anonymity breach checking.
 - Encrypted JSON backup, local restore into a vault, local JSON import.
 - Recipient-encrypted read-only snapshots with expiry and revocation; fingerprint comparison is required before sending.
-- Zero-knowledge team-vault API with Owner/Admin/Member/Read-only authorization, seven-day invitations, recipient decline, owner transfer, owner-only deletion, editable ciphertext sync and atomic member-removal key rotation. Web cryptographic primitives and tests are present; team management UI, safe self-leave UX and mobile support remain unfinished.
+- Zero-knowledge team-vault API with Owner/Admin/Member/Read-only authorization, seven-day invitations, recipient decline, owner transfer, owner-only deletion, editable ciphertext sync and atomic member-removal key rotation. The web client now has a first management surface for team creation/switching, encrypted item editing, invitations, roles and client-driven removal rekey; safe self-leave, deeper browser E2E/accessibility polish and mobile support remain unfinished.
 - Responsive light/dark web application with local-only tokens, inactivity/background locking and nonce-based CSP.
 - Flutter online registration/login, encrypted offline cache and edit queue, conflict preservation, local search, TOTP, device management, Android device-authenticated key storage and screenshot protection.
 - PostgreSQL/Alembic, Redis rate limiting, bounded request/resource quotas, trusted-host enforcement, Celery transactional email and retention cleanup, Docker Compose, GitHub Actions, CodeQL, dependency scanning.
