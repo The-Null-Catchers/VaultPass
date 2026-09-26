@@ -46,8 +46,12 @@ test("team vault keeps item plaintext client-side", async ({ page }) => {
   await page.getByLabel("New team name").fill("E2E Team");
   await page.getByRole("button", { name: "Create team vault", exact: true }).click();
 
-  const teamButton = page.getByRole("button", { name: "E2E Team · owner", exact: true });
-  await expect(teamButton).toBeVisible();
+  const teamButton = page.getByRole("button").filter({ hasText: "E2E Team" });
+  const teamError = page.locator(".error[role=alert]");
+  await expect(teamButton.or(teamError)).toBeVisible({ timeout: 30000 });
+  if (await teamError.isVisible()) {
+    throw new Error(`Team creation failed: ${await teamError.textContent()}; ${failedResponses.join("; ")}`);
+  }
   await teamButton.click();
   await expect(page.getByRole("heading", { name: "E2E Team", exact: true })).toBeVisible();
 
