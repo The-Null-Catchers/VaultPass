@@ -176,6 +176,10 @@ class TeamRoleChange(Strict):
     role: TeamRole
 
 
+class TeamOwnershipTransfer(Strict):
+    target_id: UUID
+
+
 class TeamWrite(Strict):
     expected_key_version: int = Field(ge=1)
     expected_version: int = Field(ge=0)

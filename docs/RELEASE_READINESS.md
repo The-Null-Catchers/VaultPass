@@ -41,7 +41,7 @@ Cross-client interoperability, encrypted backup restore, mobile offline-queue te
 ## Remaining implementation and release gates
 
 1. Independent cryptographic/security review; full threat-driven penetration testing; physical Android key invalidation/biometric/background/clipboard tests and iOS Keychain behavior.
-2. Complete the team-vault product surface: web management/switching/conflict UX, owner transfer/team deletion, mobile support and browser E2E. The ciphertext API, roles, invitations, editable sync and staged atomic removal rotation are implemented but not independently reviewed.
+2. Complete the team-vault product surface: web management/switching/conflict UX, safe self-leave flow, mobile support and browser E2E. Backend invitation decline, owner transfer and owner-only team deletion are implemented alongside the ciphertext API, roles, invitations, editable sync and staged atomic removal rotation, but the overall team surface is not independently reviewed.
 3. iOS biometric unlock, mobile passkey/enrollment UX, mobile sharing/import/export/account-settings parity, QR TOTP scanning, comprehensive Flutter integration tests and offline crash/multi-device device tests.
 4. Encrypted attachments, dedicated structured card/identity forms, CSV/provider adapters, passphrase generator, richer password age/MFA/duplicate analysis, recent/archive sections.
 5. Ciphertext-byte quotas, automatic personal-vault GCM key rotation, account-targeted throttling, edge proxy limits, automated trash/expired-share retention and security notification preferences/new-device emails. Initial request, item, team/member, active-session and passkey caps are implemented but still need production tuning.
