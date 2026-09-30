@@ -45,7 +45,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: SingleChildScrollView(child: TeamVaultPanel(store: store))),
+        home: Scaffold(
+          body: SingleChildScrollView(child: TeamVaultPanel(store: store)),
+        ),
       ),
     );
 
@@ -69,7 +71,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: SingleChildScrollView(child: TeamVaultPanel(store: store))),
+        home: Scaffold(
+          body: SingleChildScrollView(child: TeamVaultPanel(store: store)),
+        ),
       ),
     );
 
