@@ -254,7 +254,9 @@ class _TeamVaultPanelState extends State<TeamVaultPanel> {
               ),
             ),
             FilledButton.icon(
-              onPressed: busy || store.teamLoading ? null : createTeam,
+              onPressed: busy || store.teamLoading || store.sharingIdentity == null
+                  ? null
+                  : createTeam,
               icon: const Icon(Icons.group_add_outlined),
               label: const Text('Create'),
             ),
