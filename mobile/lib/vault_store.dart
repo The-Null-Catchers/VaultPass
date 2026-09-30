@@ -828,7 +828,11 @@ class VaultStore extends ChangeNotifier {
     teamKey = null;
     items = [];
     teamItems = [];
+    teams = [];
+    incomingTeamInvitations = [];
+    sharingIdentity = null;
     selectedTeam = null;
+    teamVaults = {};
     teamRows = [];
     teamPending = [];
     access = '';
