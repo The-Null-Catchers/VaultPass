@@ -654,6 +654,97 @@ def test_team_invitation_decline_ownership_transfer_and_delete(client):
     assert client.get("/teams", headers=successor_auth).json() == []
 
 
+def test_team_self_leave_requires_admin_rekey(client):
+    owner, _, owner_auth = register(client, "leave-owner@example.com")
+    reader, _, reader_auth = register(client, "leave-reader@example.com")
+    for body, auth in [(owner, owner_auth), (reader, reader_auth)]:
+        enable_sharing(client, body, auth)
+
+    team_id = uuid.uuid4()
+    assert (
+        client.post(
+            "/teams",
+            headers=owner_auth,
+            json={"id": str(team_id), "name": "Leave flow", "wrapped_key": "B" * 512},
+        ).status_code
+        == 201
+    )
+    invitation_id = uuid.uuid4()
+    assert (
+        client.post(
+            f"/teams/{team_id}/invitations",
+            headers=owner_auth,
+            json={
+                "id": str(invitation_id),
+                "recipient_id": reader["id"],
+                "role": "read_only",
+                "wrapped_key": "C" * 512,
+                "expected_key_version": 1,
+                "expires": int(time.time()) + 3600,
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            f"/team-invitations/{invitation_id}/accept",
+            headers=reader_auth,
+        ).status_code
+        == 200
+    )
+
+    rotation_id = uuid.uuid4()
+    rotation_path = f"/teams/{team_id}/rotations/{rotation_id}"
+    requested = client.post(
+        f"/teams/{team_id}/rotations",
+        headers=reader_auth,
+        json={
+            "id": str(rotation_id),
+            "target_id": reader["id"],
+            "expected_key_version": 1,
+        },
+    )
+    assert requested.status_code == 201, requested.text
+    assert client.get(rotation_path, headers=reader_auth).status_code == 200
+
+    active = client.get(f"/teams/{team_id}/rotations", headers=owner_auth)
+    assert active.status_code == 200
+    assert active.json()[0]["self_leave"] is True
+    assert active.json()[0]["target_id"] == reader["id"]
+
+    assert (
+        client.put(
+            rotation_path + f"/members/{owner['id']}",
+            headers=reader_auth,
+            json={"wrapped_key": "D" * 512},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.put(
+            rotation_path + f"/members/{owner['id']}",
+            headers=owner_auth,
+            json={"wrapped_key": "D" * 512},
+        ).status_code
+        == 200
+    )
+    finalized = client.post(rotation_path + "/finalize", headers=owner_auth)
+    assert finalized.status_code == 200, finalized.text
+    assert finalized.json()["key_version"] == 2
+    assert client.get(f"/teams/{team_id}/sync", headers=reader_auth).status_code == 404
+
+    owner_leave = client.post(
+        f"/teams/{team_id}/rotations",
+        headers=owner_auth,
+        json={
+            "id": str(uuid.uuid4()),
+            "target_id": owner["id"],
+            "expected_key_version": 2,
+        },
+    )
+    assert owner_leave.status_code == 409
+
+
 def test_trash_purge_tombstone_and_account_deletion(client):
     body, _, auth = register(client)
     path = f"/vaults/{body['vault_id']}/items/{uuid.uuid4()}"
