@@ -41,7 +41,9 @@ class VaultStore extends ChangeNotifier {
   Uint8List? accountKey, vaultKey, teamKey;
   Map<String, dynamic> bundle = {}, wrappedVault = {};
   List<Map<String, dynamic>> rows = [], pending = [], items = [];
-  List<Map<String, dynamic>> teams = [], incomingTeamInvitations = [], teamItems = [];
+  List<Map<String, dynamic>> teams = [],
+      incomingTeamInvitations = [],
+      teamItems = [];
   Map<String, dynamic>? sharingIdentity, selectedTeam;
   Map<String, Map<String, dynamic>> teamVaults = {};
   List<Map<String, dynamic>> teamRows = [], teamPending = [];
@@ -62,6 +64,7 @@ class VaultStore extends ChangeNotifier {
       '${directory.path}/${teamCacheFileName(userId.isEmpty ? 'unknown' : userId)}',
     );
   }
+
   Future<dynamic> request(
     String path, {
     String method = 'GET',
@@ -431,7 +434,6 @@ class VaultStore extends ChangeNotifier {
     await synchronize();
   }
 
-
   Future<bool> loadTeamCache({String? expectedUser}) async {
     if (userId.isEmpty || accountKey == null) return false;
     final f = await teamCache;
@@ -444,8 +446,7 @@ class VaultStore extends ChangeNotifier {
       aad('team-cache', [userId]),
     );
     try {
-      final saved =
-          jsonDecode(utf8.decode(clear)) as Map<String, dynamic>;
+      final saved = jsonDecode(utf8.decode(clear)) as Map<String, dynamic>;
       teams = (saved['teams'] as List? ?? const [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
@@ -681,11 +682,13 @@ class VaultStore extends ChangeNotifier {
     Map<String, dynamic>? existing,
     bool deleted = false,
   }) async {
-    if (teamLoading) throw StateError('Wait for team synchronization to finish');
+    if (teamLoading)
+      throw StateError('Wait for team synchronization to finish');
     if (!teamCanEdit) throw StateError('Read-only members cannot edit');
     final team = selectedTeam;
     final key = teamKey;
-    if (team == null || key == null) throw StateError('Open a team vault first');
+    if (team == null || key == null)
+      throw StateError('Open a team vault first');
     final id = existing?['id'] ?? const Uuid().v4();
     final queued = teamPending.where((p) => p['id'] == id).firstOrNull;
     final expected = queued?['expected_version'] ?? existing?['version'] ?? 0;
@@ -763,8 +766,9 @@ class VaultStore extends ChangeNotifier {
           );
         }
         remote.addAll(
-          (page['items'] as List)
-              .map((e) => Map<String, dynamic>.from(e as Map)),
+          (page['items'] as List).map(
+            (e) => Map<String, dynamic>.from(e as Map),
+          ),
         );
         cursor = page['cursor'] as int;
         more = page['has_more'] as bool;
@@ -777,7 +781,6 @@ class VaultStore extends ChangeNotifier {
       notifyListeners();
     }
   }
-
 
   Future<void> createTeam(String name) async {
     final cleanName = name.trim();
@@ -866,7 +869,9 @@ class VaultStore extends ChangeNotifier {
 
   Future<void> logout() async {
     if (pending.isNotEmpty || hasPendingTeamChanges) {
-      throw StateError('Synchronize pending personal and team edits before signing out');
+      throw StateError(
+        'Synchronize pending personal and team edits before signing out',
+      );
     }
     try {
       await request('/auth/logout', method: 'POST');
