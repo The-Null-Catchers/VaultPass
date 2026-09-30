@@ -750,6 +750,50 @@ class VaultStore extends ChangeNotifier {
     }
   }
 
+
+  Future<void> createTeam(String name) async {
+    final cleanName = name.trim();
+    if (cleanName.isEmpty || cleanName.length > 80) {
+      throw ArgumentError('Choose a team name between 1 and 80 characters');
+    }
+    if (accountKey == null) throw StateError('Unlock your vault first');
+    if (sharingIdentity == null) {
+      try {
+        sharingIdentity = Map<String, dynamic>.from(
+          await request('/sharing/keys') as Map,
+        );
+      } on ApiFailure catch (error) {
+        if (error.status == 404) {
+          throw StateError(
+            'Verify your email and enable encrypted sharing before creating a team',
+          );
+        }
+        rethrow;
+      }
+    }
+    final id = const Uuid().v4();
+    final key = randomBytes(32);
+    try {
+      final wrapped = await wrapTeamKey(
+        key,
+        sharingIdentity!['public_key'].toString(),
+        id,
+        userId,
+        1,
+      );
+      await request(
+        '/teams',
+        method: 'POST',
+        body: {'id': id, 'name': cleanName, 'wrapped_key': wrapped},
+      );
+    } finally {
+      key.fillRange(0, key.length, 0);
+    }
+    await loadTeamOverview();
+    final created = teams.where((team) => team['id'] == id).firstOrNull;
+    if (created != null) await openTeam(created);
+  }
+
   Future<void> acceptTeamInvitation(String invitationId) async {
     await request('/team-invitations/${invitationId}/accept', method: 'POST');
     await loadTeamOverview();
