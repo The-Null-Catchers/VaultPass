@@ -433,53 +433,77 @@ class VaultStore extends ChangeNotifier {
 
 
   Future<bool> loadTeamCache({String? expectedUser}) async {
-    if (userId.isEmpty) return false;
+    if (userId.isEmpty || accountKey == null) return false;
     final f = await teamCache;
     if (!await f.exists()) return false;
-    final saved = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-    if (saved['user_id'] != (expectedUser ?? userId)) return false;
-    teams = (saved['teams'] as List? ?? const [])
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
-    final identity = saved['sharing_identity'];
-    sharingIdentity = identity is Map
-        ? Map<String, dynamic>.from(identity)
-        : null;
-    final storedVaults = saved['vaults'];
-    teamVaults = {};
-    if (storedVaults is Map) {
-      for (final entry in storedVaults.entries) {
-        final value = Map<String, dynamic>.from(entry.value as Map);
-        value['rows'] = (value['rows'] as List? ?? const [])
-            .map((e) => Map<String, dynamic>.from(e as Map))
-            .toList();
-        value['pending'] = (value['pending'] as List? ?? const [])
-            .map((e) => Map<String, dynamic>.from(e as Map))
-            .toList();
-        if (value['team'] is Map) {
-          value['team'] = Map<String, dynamic>.from(value['team'] as Map);
+    final outer = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+    if (outer['user_id'] != (expectedUser ?? userId)) return false;
+    final clear = await open(
+      accountKey!,
+      Map<String, dynamic>.from(outer['payload'] as Map),
+      aad('team-cache', [userId]),
+    );
+    try {
+      final saved =
+          jsonDecode(utf8.decode(clear)) as Map<String, dynamic>;
+      teams = (saved['teams'] as List? ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      final identity = saved['sharing_identity'];
+      sharingIdentity = identity is Map
+          ? Map<String, dynamic>.from(identity)
+          : null;
+      final storedVaults = saved['vaults'];
+      teamVaults = {};
+      if (storedVaults is Map) {
+        for (final entry in storedVaults.entries) {
+          final value = Map<String, dynamic>.from(entry.value as Map);
+          value['rows'] = (value['rows'] as List? ?? const [])
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          value['pending'] = (value['pending'] as List? ?? const [])
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          if (value['team'] is Map) {
+            value['team'] = Map<String, dynamic>.from(value['team'] as Map);
+          }
+          teamVaults[entry.key.toString()] = value;
         }
-        teamVaults[entry.key.toString()] = value;
       }
+    } finally {
+      clear.fillRange(0, clear.length, 0);
     }
     notifyListeners();
     return true;
   }
 
   Future<void> persistTeamCache() async {
-    if (userId.isEmpty) return;
+    if (userId.isEmpty || accountKey == null) return;
     final f = await teamCache;
     final temporary = File('${f.path}.tmp');
-    await temporary.writeAsString(
-      jsonEncode({
-        'user_id': userId,
-        'teams': teams,
-        'sharing_identity': sharingIdentity,
-        'vaults': teamVaults,
-      }),
-      flush: true,
+    final clear = Uint8List.fromList(
+      utf8.encode(
+        jsonEncode({
+          'teams': teams,
+          'sharing_identity': sharingIdentity,
+          'vaults': teamVaults,
+        }),
+      ),
     );
-    await temporary.rename(f.path);
+    try {
+      final payload = await seal(
+        accountKey!,
+        clear,
+        aad('team-cache', [userId]),
+      );
+      await temporary.writeAsString(
+        jsonEncode({'user_id': userId, 'payload': payload}),
+        flush: true,
+      );
+      await temporary.rename(f.path);
+    } finally {
+      clear.fillRange(0, clear.length, 0);
+    }
   }
 
   Future<void> loadTeamOverview() async {
