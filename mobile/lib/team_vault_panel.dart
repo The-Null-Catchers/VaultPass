@@ -199,8 +199,12 @@ class _TeamVaultPanelState extends State<TeamVaultPanel> {
   @override
   Widget build(BuildContext context) {
     final selected = store.selectedTeam;
-    final active = store.teamItems.where((row) => row['deleted'] != true).toList();
-    final trash = store.teamItems.where((row) => row['deleted'] == true).toList();
+    final active = store.teamItems
+        .where((row) => row['deleted'] != true)
+        .toList();
+    final trash = store.teamItems
+        .where((row) => row['deleted'] == true)
+        .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -254,7 +258,8 @@ class _TeamVaultPanelState extends State<TeamVaultPanel> {
               ),
             ),
             FilledButton.icon(
-              onPressed: busy || store.teamLoading || store.sharingIdentity == null
+              onPressed:
+                  busy || store.teamLoading || store.sharingIdentity == null
                   ? null
                   : createTeam,
               icon: const Icon(Icons.group_add_outlined),
@@ -401,14 +406,18 @@ class _TeamItemEditorState extends State<_TeamItemEditor> {
   @override
   void initState() {
     super.initState();
-    title = TextEditingController(text: widget.initial['title']?.toString() ?? '');
+    title = TextEditingController(
+      text: widget.initial['title']?.toString() ?? '',
+    );
     username = TextEditingController(
       text: widget.initial['username']?.toString() ?? '',
     );
     password = TextEditingController(
       text: widget.initial['password']?.toString() ?? '',
     );
-    notes = TextEditingController(text: widget.initial['notes']?.toString() ?? '');
+    notes = TextEditingController(
+      text: widget.initial['notes']?.toString() ?? '',
+    );
   }
 
   @override
