@@ -8,6 +8,8 @@ import 'package:uuid/uuid.dart';
 import 'vault_crypto.dart';
 import 'team_crypto.dart';
 
+String teamCacheFileName(String userId) => 'vaultpass-team-cache-$userId.json';
+
 class ApiFailure implements Exception {
   final int status;
   final String message;
@@ -56,7 +58,7 @@ class VaultStore extends ChangeNotifier {
   );
   Future<File> get teamCache async => File(
     '${(await getApplicationSupportDirectory()).path/'
-    'vaultpass-team-cache-${userId.isEmpty ? 'unknown' : userId}.json',
+    '${teamCacheFileName(userId.isEmpty ? 'unknown' : userId)}',
   );
   Future<dynamic> request(
     String path, {
