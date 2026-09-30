@@ -56,10 +56,12 @@ class VaultStore extends ChangeNotifier {
   Future<File> get cache async => File(
     '${(await getApplicationSupportDirectory()).path}/vaultpass-cache.json',
   );
-  Future<File> get teamCache async => File(
-    '${(await getApplicationSupportDirectory()).path/'
-    '${teamCacheFileName(userId.isEmpty ? 'unknown' : userId)}',
-  );
+  Future<File> get teamCache async {
+    final directory = await getApplicationSupportDirectory();
+    return File(
+      '${directory.path}/${teamCacheFileName(userId.isEmpty ? 'unknown' : userId)}',
+    );
+  }
   Future<dynamic> request(
     String path, {
     String method = 'GET',
