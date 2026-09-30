@@ -1704,9 +1704,7 @@ def cancel_team_rotation(
         .where(TeamRotationJob.id == rotation_id, TeamRotationJob.team_id == team.id)
         .with_for_update()
     )
-    if job is None or (
-        job.initiator_id != device.user_id and actor.role not in {"owner", "admin"}
-    ):
+    if job is None or (job.initiator_id != device.user_id and actor.role not in {"owner", "admin"}):
         raise HTTPException(404, "Rotation not found")
     db.delete(job)
     audit(db, device.user_id, "team_key_rotation_cancelled")
