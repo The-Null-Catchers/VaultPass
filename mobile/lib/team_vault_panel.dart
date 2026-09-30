@@ -438,6 +438,7 @@ class _TeamItemEditorState extends State<_TeamItemEditor> {
           TextField(
             controller: title,
             autofocus: true,
+            onChanged: (_) => setState(() {}),
             decoration: const InputDecoration(labelText: 'Title'),
           ),
           const SizedBox(height: 12),
