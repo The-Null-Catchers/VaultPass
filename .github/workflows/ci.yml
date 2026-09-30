@@ -83,11 +83,7 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - name: Temporary Dart format diff
-        run: |
-          dart format lib test
-          git diff --color=never -- lib test
-          exit 1
+      - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze && flutter test
       - name: Build test APK and unsigned release AAB
         env:
