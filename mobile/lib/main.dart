@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'vault_crypto.dart';
 import 'vault_store.dart';
+import 'team_vault_panel.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -291,6 +292,7 @@ class _VaultHomeState extends State<VaultHome> {
     'Generator': Icons.auto_awesome,
     'Security': Icons.health_and_safety_outlined,
     'Devices': Icons.devices,
+    'Teams': Icons.groups_outlined,
     'Settings': Icons.settings_outlined,
   };
   List<dynamic> devices = [], events = [];
@@ -393,6 +395,9 @@ class _VaultHomeState extends State<VaultHome> {
       await run(() async {
         events = await store.request('/events') as List;
       });
+    }
+    if (name == 'Teams') {
+      await run(store.loadTeamOverview);
     }
   }
 
@@ -511,7 +516,9 @@ class _VaultHomeState extends State<VaultHome> {
                     style: TextStyle(color: Colors.grey, fontSize: 12),
                   ),
                   const SizedBox(height: 24),
-                  if (section == 'Generator') ...[
+                  if (section == 'Teams') ...[
+                    TeamVaultPanel(store: store),
+                  ] else if (section == 'Generator') ...[
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(24),
