@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'vault_crypto.dart';
+import 'team_crypto.dart';
 
 class ApiFailure implements Exception {
   final int status;
@@ -35,14 +36,27 @@ class VaultStore extends ChangeNotifier {
     ),
   );
   String access = '', refresh = '', userId = '', vaultId = '', email = '';
-  Uint8List? accountKey, vaultKey;
+  Uint8List? accountKey, vaultKey, teamKey;
   Map<String, dynamic> bundle = {}, wrappedVault = {};
   List<Map<String, dynamic>> rows = [], pending = [], items = [];
-  bool loading = false;
+  List<Map<String, dynamic>> teams = [], incomingTeamInvitations = [], teamItems = [];
+  Map<String, dynamic>? sharingIdentity, selectedTeam;
+  Map<String, Map<String, dynamic>> teamVaults = {};
+  List<Map<String, dynamic>> teamRows = [], teamPending = [];
+  bool loading = false, teamLoading = false;
   int generation = 0;
   bool get unlocked => vaultKey != null;
+  bool get teamCanEdit =>
+      selectedTeam != null && selectedTeam!['role'] != 'read_only';
+  bool get hasPendingTeamChanges => teamVaults.values.any(
+    (vault) => (vault['pending'] as List? ?? const []).isNotEmpty,
+  );
   Future<File> get cache async => File(
     '${(await getApplicationSupportDirectory()).path}/vaultpass-cache.json',
+  );
+  Future<File> get teamCache async => File(
+    '${(await getApplicationSupportDirectory()).path/'
+    'vaultpass-team-cache-${userId.isEmpty ? 'unknown' : userId}.json',
   );
   Future<dynamic> request(
     String path, {
@@ -176,6 +190,7 @@ class VaultStore extends ChangeNotifier {
     );
     // Preserve unsent changes only for this same account. Never mix accounts.
     await loadCache(expectedUser: userId);
+    await loadTeamCache(expectedUser: userId);
     await storage.write(key: 'refresh', value: refresh);
     if (epoch != generation) {
       lock();
@@ -254,6 +269,7 @@ class VaultStore extends ChangeNotifier {
       throw StateError('Unlock cancelled');
     }
     await decryptRows();
+    await loadTeamCache(expectedUser: userId);
     notifyListeners();
   }
 
@@ -289,6 +305,7 @@ class VaultStore extends ChangeNotifier {
     );
     refresh = await storage.read(key: 'refresh') ?? '';
     await decryptRows();
+    await loadTeamCache(expectedUser: userId);
     notifyListeners();
   }
 
@@ -410,21 +427,370 @@ class VaultStore extends ChangeNotifier {
     await synchronize();
   }
 
+
+  Future<bool> loadTeamCache({String? expectedUser}) async {
+    if (userId.isEmpty) return false;
+    final f = await teamCache;
+    if (!await f.exists()) return false;
+    final saved = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+    if (saved['user_id'] != (expectedUser ?? userId)) return false;
+    teams = (saved['teams'] as List? ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final identity = saved['sharing_identity'];
+    sharingIdentity = identity is Map
+        ? Map<String, dynamic>.from(identity)
+        : null;
+    final storedVaults = saved['vaults'];
+    teamVaults = {};
+    if (storedVaults is Map) {
+      for (final entry in storedVaults.entries) {
+        final value = Map<String, dynamic>.from(entry.value as Map);
+        value['rows'] = (value['rows'] as List? ?? const [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        value['pending'] = (value['pending'] as List? ?? const [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        if (value['team'] is Map) {
+          value['team'] = Map<String, dynamic>.from(value['team'] as Map);
+        }
+        teamVaults[entry.key.toString()] = value;
+      }
+    }
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> persistTeamCache() async {
+    if (userId.isEmpty) return;
+    final f = await teamCache;
+    final temporary = File('${f.path}.tmp');
+    await temporary.writeAsString(
+      jsonEncode({
+        'user_id': userId,
+        'teams': teams,
+        'sharing_identity': sharingIdentity,
+        'vaults': teamVaults,
+      }),
+      flush: true,
+    );
+    await temporary.rename(f.path);
+  }
+
+  Future<void> loadTeamOverview() async {
+    if (!unlocked) throw StateError('Unlock your personal vault first');
+    teamLoading = true;
+    notifyListeners();
+    try {
+      final remoteTeams = await request('/teams') as List;
+      final remoteInvitations = await request('/team-invitations') as List;
+      Map<String, dynamic>? identity;
+      try {
+        identity = Map<String, dynamic>.from(
+          await request('/sharing/keys') as Map,
+        );
+      } on ApiFailure catch (error) {
+        if (error.status != 404) rethrow;
+      }
+
+      teams = remoteTeams
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      incomingTeamInvitations = remoteInvitations
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      sharingIdentity = identity;
+
+      final activeIds = teams.map((team) => team['id'].toString()).toSet();
+      for (final team in teams) {
+        final id = team['id'].toString();
+        final cached = teamVaults[id];
+        if (cached == null) {
+          teamVaults[id] = {
+            'team': Map<String, dynamic>.from(team),
+            'rows': <Map<String, dynamic>>[],
+            'pending': <Map<String, dynamic>>[],
+          };
+          continue;
+        }
+        final cachedTeam = cached['team'] is Map
+            ? Map<String, dynamic>.from(cached['team'] as Map)
+            : <String, dynamic>{};
+        final pendingRows = (cached['pending'] as List? ?? const []);
+        final cachedEpoch = cachedTeam['key_version'];
+        final freshEpoch = team['key_version'];
+        if (cachedEpoch == freshEpoch || pendingRows.isEmpty) {
+          cached['team'] = Map<String, dynamic>.from(team);
+          if (cachedEpoch != freshEpoch) {
+            cached['rows'] = <Map<String, dynamic>>[];
+          }
+        }
+      }
+      teamVaults.removeWhere(
+        (id, value) =>
+            !activeIds.contains(id) &&
+            (value['pending'] as List? ?? const []).isEmpty,
+      );
+      await persistTeamCache();
+    } finally {
+      teamLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> openTeam(
+    Map<String, dynamic> team, {
+    bool synchronize = true,
+  }) async {
+    if (!unlocked || accountKey == null) {
+      throw StateError('Unlock your personal vault first');
+    }
+    final id = team['id'].toString();
+    final cached = teamVaults[id];
+    if (cached != null) {
+      final cachedTeam = cached['team'] is Map
+          ? Map<String, dynamic>.from(cached['team'] as Map)
+          : <String, dynamic>{};
+      final pendingRows = (cached['pending'] as List? ?? const []);
+      if (pendingRows.isNotEmpty &&
+          cachedTeam['key_version'] != team['key_version']) {
+        throw StateError(
+          'Team key changed while offline edits are pending. '
+          'Pending ciphertext was preserved and will not be overwritten.',
+        );
+      }
+    }
+
+    if (sharingIdentity == null) {
+      try {
+        sharingIdentity = Map<String, dynamic>.from(
+          await request('/sharing/keys') as Map,
+        );
+      } on ApiFailure catch (error) {
+        if (error.status == 404) {
+          throw StateError(
+            'Enable encrypted sharing on your account before opening team vaults',
+          );
+        }
+        rethrow;
+      }
+    }
+
+    final nextKey = await unwrapTeamKey(
+      team['wrapped_key'].toString(),
+      accountKey!,
+      Map<String, dynamic>.from(sharingIdentity!['private_key'] as Map),
+      id,
+      userId,
+      team['key_version'] as int,
+    );
+    teamKey?.fillRange(0, teamKey!.length, 0);
+    teamKey = nextKey;
+    selectedTeam = Map<String, dynamic>.from(team);
+
+    final state = teamVaults.putIfAbsent(id, () {
+      return {
+        'team': Map<String, dynamic>.from(team),
+        'rows': <Map<String, dynamic>>[],
+        'pending': <Map<String, dynamic>>[],
+      };
+    });
+    state['team'] = Map<String, dynamic>.from(team);
+    teamRows = (state['rows'] as List? ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    teamPending = (state['pending'] as List? ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    await decryptTeamRows();
+    await persistTeamCache();
+    if (synchronize) await synchronizeTeam();
+    notifyListeners();
+  }
+
+  Future<void> decryptTeamRows() async {
+    final team = selectedTeam;
+    final key = teamKey;
+    if (team == null || key == null) {
+      teamItems = [];
+      return;
+    }
+    final decrypted = <Map<String, dynamic>>[];
+    for (final row in teamRows) {
+      if (row['purged'] == true) continue;
+      decrypted.add({
+        ...row,
+        'data': await decryptTeamItem(
+          key,
+          Map<String, dynamic>.from(row['payload'] as Map),
+          team['id'].toString(),
+          row['id'].toString(),
+          team['key_version'] as int,
+          row['version'] as int,
+        ),
+      });
+    }
+    decrypted.sort(
+      (a, b) => (b['updated'] as num).compareTo(a['updated'] as num),
+    );
+    teamItems = decrypted;
+  }
+
+  Future<void> _persistSelectedTeamState() async {
+    final team = selectedTeam;
+    if (team == null) return;
+    teamVaults[team['id'].toString()] = {
+      'team': Map<String, dynamic>.from(team),
+      'rows': teamRows,
+      'pending': teamPending,
+    };
+    await persistTeamCache();
+  }
+
+  Future<void> saveTeamItem(
+    Map<String, dynamic> data, {
+    Map<String, dynamic>? existing,
+    bool deleted = false,
+  }) async {
+    if (teamLoading) throw StateError('Wait for team synchronization to finish');
+    if (!teamCanEdit) throw StateError('Read-only members cannot edit');
+    final team = selectedTeam;
+    final key = teamKey;
+    if (team == null || key == null) throw StateError('Open a team vault first');
+    final id = existing?['id'] ?? const Uuid().v4();
+    final queued = teamPending.where((p) => p['id'] == id).firstOrNull;
+    final expected = queued?['expected_version'] ?? existing?['version'] ?? 0;
+    final keyVersion = team['key_version'] as int;
+    final payload = await encryptTeamItem(
+      key,
+      data,
+      team['id'].toString(),
+      id.toString(),
+      keyVersion,
+      expected + 1,
+    );
+    teamPending.removeWhere((p) => p['id'] == id);
+    teamPending.add({
+      'id': id,
+      'key_version': keyVersion,
+      'expected_version': expected,
+      'payload': payload,
+      'deleted': deleted,
+    });
+    teamRows.removeWhere((row) => row['id'] == id);
+    teamRows.add({
+      'id': id,
+      'version': expected + 1,
+      'payload': payload,
+      'deleted': deleted,
+      'purged': false,
+      'updated': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    });
+    await _persistSelectedTeamState();
+    await decryptTeamRows();
+    notifyListeners();
+  }
+
+  Future<void> synchronizeTeam() async {
+    final team = selectedTeam;
+    if (teamLoading || team == null || teamKey == null) return;
+    teamLoading = true;
+    notifyListeners();
+    try {
+      final teamId = team['id'].toString();
+      final keyVersion = team['key_version'] as int;
+      while (teamPending.isNotEmpty) {
+        final change = teamPending.first;
+        if (change['key_version'] != keyVersion) {
+          throw StateError(
+            'Team key changed while offline edits are pending. '
+            'Pending ciphertext was preserved.',
+          );
+        }
+        await request(
+          '/teams/${teamId}/items/${change['id']}',
+          method: 'PUT',
+          body: {
+            'expected_key_version': keyVersion,
+            'expected_version': change['expected_version'],
+            'payload': change['payload'],
+            'deleted': change['deleted'],
+          },
+        );
+        teamPending.removeAt(0);
+        await _persistSelectedTeamState();
+      }
+
+      var cursor = 0;
+      var more = true;
+      final remote = <Map<String, dynamic>>[];
+      while (more) {
+        final page = Map<String, dynamic>.from(
+          await request('/teams/${teamId}/sync?after=${cursor}') as Map,
+        );
+        if (page['key_version'] != keyVersion) {
+          throw StateError(
+            'Team key changed. Refresh the team before decrypting new items.',
+          );
+        }
+        remote.addAll(
+          (page['items'] as List)
+              .map((e) => Map<String, dynamic>.from(e as Map)),
+        );
+        cursor = page['cursor'] as int;
+        more = page['has_more'] as bool;
+      }
+      teamRows = remote;
+      await decryptTeamRows();
+      await _persistSelectedTeamState();
+    } finally {
+      teamLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> acceptTeamInvitation(String invitationId) async {
+    await request('/team-invitations/${invitationId}/accept', method: 'POST');
+    await loadTeamOverview();
+  }
+
+  Future<void> declineTeamInvitation(String invitationId) async {
+    await request('/team-invitations/${invitationId}/decline', method: 'POST');
+    await loadTeamOverview();
+  }
+
+  void closeTeam() {
+    teamKey?.fillRange(0, teamKey!.length, 0);
+    teamKey = null;
+    selectedTeam = null;
+    teamRows = [];
+    teamPending = [];
+    teamItems = [];
+    notifyListeners();
+  }
+
   void lock() {
     generation++;
     accountKey?.fillRange(0, accountKey!.length, 0);
     vaultKey?.fillRange(0, vaultKey!.length, 0);
+    teamKey?.fillRange(0, teamKey!.length, 0);
     accountKey = null;
     vaultKey = null;
+    teamKey = null;
     items = [];
+    teamItems = [];
+    selectedTeam = null;
+    teamRows = [];
+    teamPending = [];
     access = '';
     refresh = '';
     notifyListeners();
   }
 
   Future<void> logout() async {
-    if (pending.isNotEmpty) {
-      throw StateError('Synchronize pending edits before signing out');
+    if (pending.isNotEmpty || hasPendingTeamChanges) {
+      throw StateError('Synchronize pending personal and team edits before signing out');
     }
     try {
       await request('/auth/logout', method: 'POST');
@@ -433,6 +799,10 @@ class VaultStore extends ChangeNotifier {
       await biometricStorage.deleteAll();
       final f = await cache;
       if (await f.exists()) await f.delete();
+      if (userId.isNotEmpty) {
+        final tf = await teamCache;
+        if (await tf.exists()) await tf.delete();
+      }
       lock();
     }
   }
