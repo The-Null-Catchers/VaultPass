@@ -682,13 +682,15 @@ class VaultStore extends ChangeNotifier {
     Map<String, dynamic>? existing,
     bool deleted = false,
   }) async {
-    if (teamLoading)
+    if (teamLoading) {
       throw StateError('Wait for team synchronization to finish');
+    }
     if (!teamCanEdit) throw StateError('Read-only members cannot edit');
     final team = selectedTeam;
     final key = teamKey;
-    if (team == null || key == null)
+    if (team == null || key == null) {
       throw StateError('Open a team vault first');
+    }
     final id = existing?['id'] ?? const Uuid().v4();
     final queued = teamPending.where((p) => p['id'] == id).firstOrNull;
     final expected = queued?['expected_version'] ?? existing?['version'] ?? 0;
@@ -740,7 +742,7 @@ class VaultStore extends ChangeNotifier {
           );
         }
         await request(
-          '/teams/${teamId}/items/${change['id']}',
+          '/teams/$teamId/items/${change['id']}',
           method: 'PUT',
           body: {
             'expected_key_version': keyVersion,
@@ -758,7 +760,7 @@ class VaultStore extends ChangeNotifier {
       final remote = <Map<String, dynamic>>[];
       while (more) {
         final page = Map<String, dynamic>.from(
-          await request('/teams/${teamId}/sync?after=${cursor}') as Map,
+          await request('/teams/$teamId/sync?after=$cursor') as Map,
         );
         if (page['key_version'] != keyVersion) {
           throw StateError(
@@ -826,12 +828,12 @@ class VaultStore extends ChangeNotifier {
   }
 
   Future<void> acceptTeamInvitation(String invitationId) async {
-    await request('/team-invitations/${invitationId}/accept', method: 'POST');
+    await request('/team-invitations/$invitationId/accept', method: 'POST');
     await loadTeamOverview();
   }
 
   Future<void> declineTeamInvitation(String invitationId) async {
-    await request('/team-invitations/${invitationId}/decline', method: 'POST');
+    await request('/team-invitations/$invitationId/decline', method: 'POST');
     await loadTeamOverview();
   }
 
