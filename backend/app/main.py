@@ -1636,8 +1636,7 @@ def list_team_rotations(team_id: uuid.UUID, db: DB, device: Auth):
     if job is None:
         return []
     visible = actor.role in {"owner", "admin"} or (
-        job.initiator_id == device.user_id
-        and job.target_id == device.user_id
+        job.initiator_id == device.user_id and job.target_id == device.user_id
     )
     if not visible:
         return []
@@ -1716,9 +1715,7 @@ def cancel_team_rotation(
         .with_for_update()
     )
     admin_self_leave_takeover = (
-        job is not None
-        and job.initiator_id == job.target_id
-        and actor.role in {"owner", "admin"}
+        job is not None and job.initiator_id == job.target_id and actor.role in {"owner", "admin"}
     )
     if job is None or (job.initiator_id != device.user_id and not admin_self_leave_takeover):
         raise HTTPException(404, "Rotation not found")
