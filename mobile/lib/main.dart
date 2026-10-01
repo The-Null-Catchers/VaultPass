@@ -109,13 +109,16 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final email = TextEditingController(), password = TextEditingController();
-  bool register = false, busy = false;
-  String error = '';
+  final email = TextEditingController(),
+      password = TextEditingController(),
+      recoveryKey = TextEditingController();
+  bool register = false, recover = false, busy = false;
+  String error = '', notice = '';
   @override
   void dispose() {
     email.dispose();
     password.dispose();
+    recoveryKey.dispose();
     super.dispose();
   }
 
@@ -123,6 +126,7 @@ class _LoginPageState extends State<LoginPage> {
     setState(() {
       busy = true;
       error = '';
+      notice = '';
     });
     try {
       await action();
@@ -163,7 +167,11 @@ class _LoginPageState extends State<LoginPage> {
                 ),
                 const SizedBox(height: 38),
                 Text(
-                  register ? 'Create your private space' : 'Welcome back',
+                  recover
+                      ? 'Recover your private space'
+                      : register
+                      ? 'Create your private space'
+                      : 'Welcome back',
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 20),
@@ -174,13 +182,28 @@ class _LoginPageState extends State<LoginPage> {
                   decoration: const InputDecoration(labelText: 'Email address'),
                 ),
                 const SizedBox(height: 16),
+                if (recover) ...[
+                  TextField(
+                    controller: recoveryKey,
+                    obscureText: true,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Recovery key',
+                      hintText: 'VP1-…',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 TextField(
                   controller: password,
                   obscureText: true,
                   enableSuggestions: false,
                   autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'Master password',
+                  decoration: InputDecoration(
+                    labelText: recover
+                        ? 'New master password'
+                        : 'Master password',
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -188,6 +211,16 @@ class _LoginPageState extends State<LoginPage> {
                   const Text(
                     'Use at least 12 characters. We cannot recover a forgotten master password.',
                     style: TextStyle(fontSize: 12),
+                  ),
+                if (recover)
+                  const Text(
+                    'Recovery is one-time. It revokes every session and passkey; sign in again and create a new recovery key.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                if (notice.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Text(notice),
                   ),
                 if (error.isNotEmpty)
                   Padding(
@@ -202,17 +235,36 @@ class _LoginPageState extends State<LoginPage> {
                 FilledButton.icon(
                   onPressed: busy
                       ? null
-                      : () => run(
-                          () => widget.store.login(
+                      : () => run(() async {
+                          if (recover) {
+                            await widget.store.recoverAccount(
+                              email.text.trim(),
+                              recoveryKey.text,
+                              password.text,
+                            );
+                            recoveryKey.clear();
+                            if (mounted) {
+                              setState(() {
+                                recover = false;
+                                register = false;
+                                notice =
+                                    'Recovery complete. Sign in with your new master password.';
+                              });
+                            }
+                            return;
+                          }
+                          await widget.store.login(
                             email.text.trim(),
                             password.text,
                             register: register,
-                          ),
-                        ),
+                          );
+                        }),
                   icon: const Icon(Icons.lock_outline),
                   label: Text(
                     busy
                         ? 'Deriving keys…'
+                        : recover
+                        ? 'Recover account'
                         : register
                         ? 'Create encrypted vault'
                         : 'Unlock online',
@@ -221,11 +273,26 @@ class _LoginPageState extends State<LoginPage> {
                 TextButton(
                   onPressed: busy
                       ? null
-                      : () => setState(() => register = !register),
+                      : () => setState(() {
+                          recover = false;
+                          register = !register;
+                        }),
                   child: Text(
                     register
                         ? 'Already have an account? Sign in'
                         : 'New here? Create an account',
+                  ),
+                ),
+                TextButton(
+                  onPressed: busy
+                      ? null
+                      : () => setState(() {
+                          recover = !recover;
+                          register = false;
+                          error = '';
+                        }),
+                  child: Text(
+                    recover ? 'Back to sign in' : 'Use a recovery key',
                   ),
                 ),
                 const Divider(height: 30),
@@ -384,6 +451,81 @@ class _VaultHomeState extends State<VaultHome> {
     );
   }
 
+  Future<String?> promptValue(
+    String title,
+    String label, {
+    bool obscure = true,
+  }) async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          obscureText: obscure,
+          enableSuggestions: !obscure,
+          autocorrect: false,
+          decoration: InputDecoration(labelText: label),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
+  }
+
+  Future<void> changeMasterPassword() async {
+    final current = TextEditingController();
+    final next = TextEditingController();
+    final values = await showDialog<List<String>>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Change master password'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: current,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Current password'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: next,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'New password'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, [current.text, next.text]),
+            child: const Text('Change & revoke sessions'),
+          ),
+        ],
+      ),
+    );
+    current.dispose();
+    next.dispose();
+    if (values == null) return;
+    await store.changeMasterPassword(values[0], values[1]);
+  }
+
   Future<void> navigate(String name) async {
     setState(() => section = name);
     if (name == 'Devices') {
@@ -398,6 +540,9 @@ class _VaultHomeState extends State<VaultHome> {
     }
     if (name == 'Teams') {
       await run(store.loadTeamOverview);
+    }
+    if (name == 'Settings') {
+      await run(store.refreshAccountSecurity);
     }
   }
 
@@ -577,10 +722,112 @@ class _VaultHomeState extends State<VaultHome> {
                         }
                       }),
                     ),
-                    const ListTile(
-                      title: Text('Backup, import & account settings'),
+                    ListTile(
+                      leading: Icon(
+                        store.emailVerified
+                            ? Icons.verified_outlined
+                            : Icons.mark_email_unread_outlined,
+                      ),
+                      title: Text(
+                        store.emailVerified
+                            ? 'Email verified'
+                            : 'Verify email address',
+                      ),
                       subtitle: Text(
-                        'Use the web client for encrypted backup, JSON import, email verification and master-password changes.',
+                        store.emailVerified
+                            ? store.email
+                            : 'Verification unlocks sharing and Team Vault enrollment.',
+                      ),
+                      trailing: store.emailVerified
+                          ? null
+                          : TextButton(
+                              onPressed: busy
+                                  ? null
+                                  : () => run(() async {
+                                      await store.requestEmailVerification();
+                                      if (!mounted) return;
+                                      final token = await promptValue(
+                                        'Verify email',
+                                        'Verification token',
+                                        obscure: false,
+                                      );
+                                      if (token != null &&
+                                          token.trim().isNotEmpty) {
+                                        await store.verifyEmail(token);
+                                      }
+                                    }),
+                              child: const Text('Verify'),
+                            ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.key_outlined),
+                      title: Text(
+                        store.recoveryEnabled
+                            ? 'Recovery key enabled'
+                            : 'Create recovery key',
+                      ),
+                      subtitle: const Text(
+                        'Generated locally. VaultPass never stores the recovery key itself.',
+                      ),
+                      trailing: TextButton(
+                        onPressed: busy
+                            ? null
+                            : () => run(() async {
+                                final current = await promptValue(
+                                  store.recoveryEnabled
+                                      ? 'Disable recovery key'
+                                      : 'Create recovery key',
+                                  'Master password',
+                                );
+                                if (current == null || current.isEmpty) return;
+                                if (store.recoveryEnabled) {
+                                  await store.disableRecovery(current);
+                                  return;
+                                }
+                                final key = await store.enableRecovery(current);
+                                if (!mounted) return;
+                                await showDialog<void>(
+                                  context: context,
+                                  barrierDismissible: false,
+                                  builder: (dialogContext) => AlertDialog(
+                                    title: const Text('Save your recovery key'),
+                                    content: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Text(
+                                          'This is shown once. Store it offline in a safe place.',
+                                        ),
+                                        const SizedBox(height: 12),
+                                        SelectableText(key),
+                                      ],
+                                    ),
+                                    actions: [
+                                      FilledButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dialogContext),
+                                        child: const Text('I saved it'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                        child: Text(
+                          store.recoveryEnabled ? 'Disable' : 'Create',
+                        ),
+                      ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.password_outlined),
+                      title: const Text('Change master password'),
+                      subtitle: const Text(
+                        'Re-wraps the same account key locally and revokes all sessions.',
+                      ),
+                      onTap: busy ? null : () => run(changeMasterPassword),
+                    ),
+                    const ListTile(
+                      title: Text('Backup & import'),
+                      subtitle: Text(
+                        'Encrypted backup and JSON import remain on the web client in this mobile parity slice.',
                       ),
                     ),
                     ListTile(
