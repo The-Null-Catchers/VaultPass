@@ -34,7 +34,8 @@ class VaultStore extends ChangeNotifier {
       storageNamespace: 'vaultpass_biometric',
     ),
     iOptions: IOSOptions(
-      accessibility: KeychainAccessibility.unlocked_this_device,
+      accessibility: KeychainAccessibility.passcode,
+      accessControlFlags: [AccessControlFlag.biometryCurrentSet],
     ),
   );
   String access = '', refresh = '', userId = '', vaultId = '', email = '';
@@ -284,10 +285,8 @@ class VaultStore extends ChangeNotifier {
   }
 
   Future<void> enableBiometric() async {
-    if (!Platform.isAndroid) {
-      throw StateError(
-        'Biometric key binding is currently implemented for Android only',
-      );
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      throw StateError('Device-authenticated unlock is available on mobile only');
     }
     if (accountKey == null) {
       throw StateError('Unlock with your master password first');
@@ -299,7 +298,9 @@ class VaultStore extends ChangeNotifier {
   }
 
   Future<void> biometricUnlock() async {
-    if (!Platform.isAndroid) throw StateError('Available on Android only');
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      throw StateError('Device-authenticated unlock is available on mobile only');
+    }
     if (!await loadCache()) throw StateError('No cached vault');
     final secret = await biometricStorage.read(key: 'account_key');
     if (secret == null) throw StateError('Enable biometrics after signing in');
