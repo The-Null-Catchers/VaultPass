@@ -286,7 +286,9 @@ class VaultStore extends ChangeNotifier {
 
   Future<void> enableBiometric() async {
     if (!Platform.isAndroid && !Platform.isIOS) {
-      throw StateError('Device-authenticated unlock is available on mobile only');
+      throw StateError(
+        'Device-authenticated unlock is available on mobile only',
+      );
     }
     if (accountKey == null) {
       throw StateError('Unlock with your master password first');
@@ -299,7 +301,9 @@ class VaultStore extends ChangeNotifier {
 
   Future<void> biometricUnlock() async {
     if (!Platform.isAndroid && !Platform.isIOS) {
-      throw StateError('Device-authenticated unlock is available on mobile only');
+      throw StateError(
+        'Device-authenticated unlock is available on mobile only',
+      );
     }
     if (!await loadCache()) throw StateError('No cached vault');
     final secret = await biometricStorage.read(key: 'account_key');
