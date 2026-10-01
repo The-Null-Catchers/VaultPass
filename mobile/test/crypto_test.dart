@@ -33,6 +33,65 @@ void main() {
       throwsA(anything),
     );
   });
+  test(
+    'Account rewrap preserves the account key under a new password',
+    () async {
+      final accountKey = randomBytes(32);
+      final update = await rewrapAccount(
+        'PUBLIC NEW MASTER PASSWORD',
+        '00000000-0000-0000-0000-000000000001',
+        accountKey,
+      );
+      final derived = await derive(
+        'PUBLIC NEW MASTER PASSWORD',
+        update.bundle['salt'] as String,
+      );
+      try {
+        final opened = await open(
+          derived.wrap,
+          Map<String, dynamic>.from(update.bundle['account_key'] as Map),
+          aad('account', ['00000000-0000-0000-0000-000000000001']),
+        );
+        expect(opened, accountKey);
+        opened.fillRange(0, opened.length, 0);
+      } finally {
+        derived.wrap.fillRange(0, derived.wrap.length, 0);
+        accountKey.fillRange(0, accountKey.length, 0);
+      }
+    },
+  );
+
+  test(
+    'Recovery key wraps account key and rejects the wrong context',
+    () async {
+      final accountKey = randomBytes(32);
+      final recovery = await createRecovery(
+        accountKey,
+        'public-recovery-context',
+      );
+      final opened = await unlockRecovery(
+        recovery.recoveryKey,
+        'public-recovery-context',
+        recovery.accountKey,
+      );
+      try {
+        expect(opened.accountKey, accountKey);
+        expect(opened.recoveryAuth, recovery.recoveryAuth);
+        await expectLater(
+          unlockRecovery(
+            recovery.recoveryKey,
+            'wrong-context',
+            recovery.accountKey,
+          ),
+          throwsA(anything),
+        );
+      } finally {
+        opened.accountKey.fillRange(0, opened.accountKey.length, 0);
+        accountKey.fillRange(0, accountKey.length, 0);
+      }
+    },
+  );
+
   test('RFC6238 vector', () async {
     expect(
       await totp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', seconds: 59, digits: 8),
