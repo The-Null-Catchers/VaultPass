@@ -1492,7 +1492,13 @@ def rotation_job(
         raise HTTPException(404, "Rotation not found")
     if job.initiator_id != device.user_id:
         membership = db.get(TeamMember, (team_id, device.user_id))
-        if not allow_admin or membership is None or membership.role not in {"owner", "admin"}:
+        admin_self_leave_takeover = (
+            allow_admin
+            and job.initiator_id == job.target_id
+            and membership is not None
+            and membership.role in {"owner", "admin"}
+        )
+        if not admin_self_leave_takeover:
             raise HTTPException(404, "Rotation not found")
     if job.expires <= now():
         raise HTTPException(410, "Rotation expired")
@@ -1704,7 +1710,12 @@ def cancel_team_rotation(
         .where(TeamRotationJob.id == rotation_id, TeamRotationJob.team_id == team.id)
         .with_for_update()
     )
-    if job is None or (job.initiator_id != device.user_id and actor.role not in {"owner", "admin"}):
+    admin_self_leave_takeover = (
+        job is not None
+        and job.initiator_id == job.target_id
+        and actor.role in {"owner", "admin"}
+    )
+    if job is None or (job.initiator_id != device.user_id and not admin_self_leave_takeover):
         raise HTTPException(404, "Rotation not found")
     db.delete(job)
     audit(db, device.user_id, "team_key_rotation_cancelled")
