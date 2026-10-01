@@ -785,7 +785,7 @@ class _VaultHomeState extends State<VaultHome> {
                                   return;
                                 }
                                 final key = await store.enableRecovery(current);
-                                if (!mounted) return;
+                                if (!context.mounted) return;
                                 await showDialog<void>(
                                   context: context,
                                   barrierDismissible: false,
