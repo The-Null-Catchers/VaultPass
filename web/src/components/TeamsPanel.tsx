@@ -53,6 +53,16 @@ type IncomingInvitation = {
   expires: number;
 };
 
+type Rotation = {
+  id: string;
+  initiator_id: string;
+  target_id: string;
+  self_leave: boolean;
+  expected_key_version: number;
+  new_key_version: number;
+  expires: number;
+};
+
 type SharingIdentity = { public_key: string; private_key: Envelope };
 
 type TeamItemData = {
@@ -107,6 +117,7 @@ export function TeamsPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [rekeyProgress, setRekeyProgress] = useState("");
+  const [activeRotation, setActiveRotation] = useState<Rotation | null>(null);
 
   const selected = teams.find((team) => team.id === selectedId) ?? null;
 
@@ -156,14 +167,16 @@ export function TeamsPanel({
       setHasTeamKey(true);
       setSelectedId(team.id);
 
-      const [memberRows, invitationRows] = await Promise.all([
+      const [memberRows, invitationRows, rotationRows] = await Promise.all([
         api<Member[]>(`/teams/${team.id}/members`),
         team.role === "owner" || team.role === "admin"
           ? api<Invitation[]>(`/teams/${team.id}/invitations`)
           : Promise.resolve([]),
+        api<Rotation[]>(`/teams/${team.id}/rotations`),
       ]);
       setMembers(memberRows);
       setInvitations(invitationRows);
+      setActiveRotation(rotationRows[0] ?? null);
 
       const encrypted: Omit<TeamRow, "data">[] = [];
       let cursor = 0;
@@ -231,6 +244,7 @@ export function TeamsPanel({
       setMembers([]);
       setInvitations([]);
       setRows([]);
+      setActiveRotation(null);
     }
   };
 
@@ -259,21 +273,17 @@ export function TeamsPanel({
     notify("Team item encrypted and synchronized");
   };
 
-  const secureRemoveMember = async (target: Member) => {
+  const completeRotation = async (
+    rotation: Rotation,
+    target: Member,
+    cancelOnFailure = false,
+  ) => {
     if (!selected || !teamKey.current) throw new Error("Open a team vault first");
-    if (!(selected.role === "owner" || selected.role === "admin")) throw new Error("Administrator access required");
-    if (target.role === "owner") throw new Error("Transfer ownership before removing the owner");
-    if (selected.role !== "owner" && target.role === "admin") throw new Error("Only the owner can remove administrators");
-    if (!window.confirm(`Remove ${target.email}? VaultPass will rotate the team key and re-encrypt retained ciphertext before access is removed.`)) return;
-
-    const rotationId = crypto.randomUUID();
+    if (!(selected.role === "owner" || selected.role === "admin")) {
+      throw new Error("Administrator access required");
+    }
     const newKey = bytes(32);
     try {
-      const started = await api<{ new_key_version: number }>(`/teams/${selected.id}/rotations`, "POST", {
-        id: rotationId,
-        target_id: target.user_id,
-        expected_key_version: selected.key_version,
-      });
       const remaining = members.filter((member) => member.user_id !== target.user_id);
       setRekeyProgress(`Wrapping fresh key for 0/${remaining.length} members`);
       for (let index = 0; index < remaining.length; index += 1) {
@@ -284,9 +294,9 @@ export function TeamsPanel({
           member.public_key,
           selected.id,
           member.user_id,
-          started.new_key_version,
+          rotation.new_key_version,
         );
-        await api(`/teams/${selected.id}/rotations/${rotationId}/members/${member.user_id}`, "PUT", {
+        await api(`/teams/${selected.id}/rotations/${rotation.id}/members/${member.user_id}`, "PUT", {
           wrapped_key,
         });
         setRekeyProgress(`Wrapping fresh key for ${index + 1}/${remaining.length} members`);
@@ -301,27 +311,89 @@ export function TeamsPanel({
           row.data,
           selected.id,
           row.id,
-          started.new_key_version,
+          rotation.new_key_version,
           row.version + 1,
         );
-        await api(`/teams/${selected.id}/rotations/${rotationId}/items/${row.id}`, "PUT", {
+        await api(`/teams/${selected.id}/rotations/${rotation.id}/items/${row.id}`, "PUT", {
           expected_version: row.version,
           payload,
         });
         setRekeyProgress(`Re-encrypting ${index + 1}/${retained.length} retained items`);
       }
       setRekeyProgress("Finalizing atomic key rotation");
-      await api(`/teams/${selected.id}/rotations/${rotationId}/finalize`, "POST");
+      await api(`/teams/${selected.id}/rotations/${rotation.id}/finalize`, "POST");
       setRekeyProgress("");
+      setActiveRotation(null);
       await refreshSelected();
-      notify("Member removed after atomic team-key rotation");
+      notify(rotation.self_leave ? "Team member left after secure key rotation" : "Member removed after atomic team-key rotation");
     } catch (value) {
-      await api(`/teams/${selected.id}/rotations/${rotationId}`, "DELETE").catch(() => undefined);
+      if (cancelOnFailure) {
+        await api(`/teams/${selected.id}/rotations/${rotation.id}`, "DELETE").catch(() => undefined);
+      }
       setRekeyProgress("");
       throw value;
     } finally {
       newKey.fill(0);
     }
+  };
+
+  const secureRemoveMember = async (target: Member) => {
+    if (!selected || !teamKey.current) throw new Error("Open a team vault first");
+    if (!(selected.role === "owner" || selected.role === "admin")) throw new Error("Administrator access required");
+    if (activeRotation) throw new Error("Finish or cancel the active team key rotation first");
+    if (target.role === "owner") throw new Error("Transfer ownership before removing the owner");
+    if (selected.role !== "owner" && target.role === "admin") throw new Error("Only the owner can remove administrators");
+    if (!window.confirm(`Remove ${target.email}? VaultPass will rotate the team key and re-encrypt retained ciphertext before access is removed.`)) return;
+
+    const rotationId = crypto.randomUUID();
+    const started = await api<{ new_key_version: number; expires: number }>(`/teams/${selected.id}/rotations`, "POST", {
+      id: rotationId,
+      target_id: target.user_id,
+      expected_key_version: selected.key_version,
+    });
+    await completeRotation(
+      {
+        id: rotationId,
+        initiator_id: userId,
+        target_id: target.user_id,
+        self_leave: false,
+        expected_key_version: selected.key_version,
+        new_key_version: started.new_key_version,
+        expires: started.expires,
+      },
+      target,
+      true,
+    );
+  };
+
+  const requestSelfLeave = async () => {
+    if (!selected) throw new Error("Open a team vault first");
+    if (selected.role === "owner") throw new Error("Transfer ownership before leaving the team");
+    if (activeRotation) throw new Error("A team key rotation is already active");
+    if (!window.confirm("Request a secure leave? Your access stays active until an Owner/Admin rotates the team key and finalizes your removal.")) return;
+    const id = crypto.randomUUID();
+    const started = await api<{ new_key_version: number; expires: number }>(`/teams/${selected.id}/rotations`, "POST", {
+      id,
+      target_id: userId,
+      expected_key_version: selected.key_version,
+    });
+    setActiveRotation({
+      id,
+      initiator_id: userId,
+      target_id: userId,
+      self_leave: true,
+      expected_key_version: selected.key_version,
+      new_key_version: started.new_key_version,
+      expires: started.expires,
+    });
+    notify("Secure leave requested. An Owner/Admin must complete the key rotation.");
+  };
+
+  const cancelSelfLeave = async () => {
+    if (!selected || !activeRotation || !activeRotation.self_leave) return;
+    await api(`/teams/${selected.id}/rotations/${activeRotation.id}`, "DELETE");
+    setActiveRotation(null);
+    notify("Secure leave request cancelled");
   };
 
   return (
@@ -494,8 +566,42 @@ export function TeamsPanel({
                 </div>
               </div>
             ))}
-            {selected.role !== "owner" && (
-              <p className="warning">Self-leave is intentionally unavailable until a reviewed protocol can rotate the key without giving a departing member unilateral ciphertext-replacement authority. Ask an owner/admin to remove you securely.</p>
+            {activeRotation?.self_leave && (
+              <div className="warning" role="status">
+                <strong>Secure leave pending</strong>
+                <p>
+                  {activeRotation.target_id === userId
+                    ? "Your membership stays active until an Owner/Admin completes the key rotation."
+                    : "A member requested to leave. Their access must remain active until the team key is rotated."}
+                </p>
+                <small>Request expires {new Date(activeRotation.expires * 1000).toLocaleString()}.</small>
+                <div className="actions">
+                  {(selected.role === "owner" || selected.role === "admin") && (() => {
+                    const target = members.find((member) => member.user_id === activeRotation.target_id);
+                    return target ? (
+                      <button
+                        className="primary"
+                        disabled={busy}
+                        onClick={() => void run(() => completeRotation(activeRotation, target))}
+                      >
+                        Complete secure leave rekey
+                      </button>
+                    ) : null;
+                  })()}
+                  {activeRotation.initiator_id === userId && (
+                    <button disabled={busy} onClick={() => void run(cancelSelfLeave)}>
+                      Cancel leave request
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+            {selected.role !== "owner" && !activeRotation && (
+              <div className="actions">
+                <button disabled={busy || Boolean(rekeyProgress)} onClick={() => void run(requestSelfLeave)}>
+                  Leave team securely
+                </button>
+              </div>
             )}
           </section>
 
