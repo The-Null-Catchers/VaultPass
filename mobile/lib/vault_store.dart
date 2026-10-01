@@ -48,6 +48,8 @@ class VaultStore extends ChangeNotifier {
   Map<String, Map<String, dynamic>> teamVaults = {};
   List<Map<String, dynamic>> teamRows = [], teamPending = [];
   bool loading = false, teamLoading = false;
+  bool emailVerified = false, recoveryEnabled = false;
+  String recoveryContext = '';
   int generation = 0;
   bool get unlocked => vaultKey != null;
   bool get teamCanEdit =>
@@ -204,6 +206,7 @@ class VaultStore extends ChangeNotifier {
       throw StateError('Unlock cancelled');
     }
     await synchronize();
+    await refreshAccountSecurity();
     notifyListeners();
   }
 
@@ -827,6 +830,158 @@ class VaultStore extends ChangeNotifier {
     if (created != null) await openTeam(created);
   }
 
+  Future<void> refreshAccountSecurity() async {
+    if (!unlocked) return;
+    final account = Map<String, dynamic>.from(await request('/account') as Map);
+    final recovery = Map<String, dynamic>.from(
+      await request('/account/recovery') as Map,
+    );
+    emailVerified = account['verified'] == true;
+    recoveryEnabled = recovery['enabled'] == true;
+    recoveryContext = recovery['context']?.toString() ?? '';
+    notifyListeners();
+  }
+
+  Future<void> requestEmailVerification() async {
+    await request('/account/verification', method: 'POST');
+  }
+
+  Future<void> verifyEmail(String token) async {
+    final clean = token.trim();
+    if (clean.isEmpty) throw ArgumentError('Enter the verification token');
+    await request('/auth/verify', method: 'POST', body: {'token': clean});
+    emailVerified = true;
+    notifyListeners();
+  }
+
+  Future<void> changeMasterPassword(
+    String currentMaster,
+    String newMaster,
+  ) async {
+    if (accountKey == null) throw StateError('Unlock your vault first');
+    if (pending.isNotEmpty || hasPendingTeamChanges) {
+      throw StateError(
+        'Synchronize pending personal and team edits before changing the master password',
+      );
+    }
+    final current = await derive(currentMaster, bundle['salt'].toString());
+    try {
+      final update = await rewrapAccount(newMaster, userId, accountKey!);
+      await request(
+        '/account/password',
+        method: 'POST',
+        body: {
+          'current_auth_secret': current.auth,
+          'auth_secret': update.authSecret,
+          'bundle': update.bundle,
+        },
+      );
+      bundle = Map<String, dynamic>.from(update.bundle);
+      await persist();
+      await storage.delete(key: 'refresh');
+      await biometricStorage.deleteAll();
+      access = '';
+      refresh = '';
+      lock();
+    } finally {
+      current.wrap.fillRange(0, current.wrap.length, 0);
+    }
+  }
+
+  Future<String> enableRecovery(String currentMaster) async {
+    if (accountKey == null) throw StateError('Unlock your vault first');
+    if (recoveryEnabled) throw StateError('Recovery is already enabled');
+    if (recoveryContext.isEmpty) await refreshAccountSecurity();
+    final current = await derive(currentMaster, bundle['salt'].toString());
+    try {
+      final recovery = await createRecovery(accountKey!, recoveryContext);
+      await request(
+        '/account/recovery',
+        method: 'POST',
+        body: {
+          'current_auth_secret': current.auth,
+          'recovery_auth_secret': recovery.recoveryAuth,
+          'account_key': recovery.accountKey,
+        },
+      );
+      recoveryEnabled = true;
+      notifyListeners();
+      return recovery.recoveryKey;
+    } finally {
+      current.wrap.fillRange(0, current.wrap.length, 0);
+    }
+  }
+
+  Future<void> disableRecovery(String currentMaster) async {
+    if (!recoveryEnabled) return;
+    final current = await derive(currentMaster, bundle['salt'].toString());
+    try {
+      await request(
+        '/account/recovery',
+        method: 'DELETE',
+        body: {'auth_secret': current.auth},
+      );
+      recoveryEnabled = false;
+      notifyListeners();
+    } finally {
+      current.wrap.fillRange(0, current.wrap.length, 0);
+    }
+  }
+
+  Future<void> recoverAccount(
+    String address,
+    String recoveryKey,
+    String newMaster,
+  ) async {
+    if (newMaster.length < 12) {
+      throw ArgumentError(
+        'Use at least 12 characters for the new master password',
+      );
+    }
+    final lookup = Map<String, dynamic>.from(
+      await request(
+            '/auth/recovery/lookup',
+            method: 'POST',
+            body: {'email': address},
+          )
+          as Map,
+    );
+    final recovered = await unlockRecovery(
+      recoveryKey,
+      lookup['context'].toString(),
+      Map<String, dynamic>.from(lookup['account_key'] as Map),
+    );
+    try {
+      final challenge = Map<String, dynamic>.from(
+        await request(
+              '/auth/recovery/verify',
+              method: 'POST',
+              body: {
+                'email': address,
+                'recovery_auth_secret': recovered.recoveryAuth,
+              },
+            )
+            as Map,
+      );
+      final update = await rewrapAccount(
+        newMaster,
+        challenge['user_id'].toString(),
+        recovered.accountKey,
+      );
+      await request(
+        '/auth/recovery/complete',
+        method: 'POST',
+        body: {
+          'token': challenge['token'],
+          'auth_secret': update.authSecret,
+          'bundle': update.bundle,
+        },
+      );
+    } finally {
+      recovered.accountKey.fillRange(0, recovered.accountKey.length, 0);
+    }
+  }
+
   Future<void> acceptTeamInvitation(String invitationId) async {
     await request('/team-invitations/$invitationId/accept', method: 'POST');
     await loadTeamOverview();
@@ -861,6 +1016,9 @@ class VaultStore extends ChangeNotifier {
     incomingTeamInvitations = [];
     sharingIdentity = null;
     selectedTeam = null;
+    emailVerified = false;
+    recoveryEnabled = false;
+    recoveryContext = '';
     teamVaults = {};
     teamRows = [];
     teamPending = [];
