@@ -578,10 +578,10 @@ export function TeamsPanel({
                 <div className="actions">
                   {(selected.role === "owner" || selected.role === "admin") && (() => {
                     const target = members.find((member) => member.user_id === activeRotation.target_id);
+                    if (!target) return null;
                     const canFinalize =
-                      target &&
-                      (selected.role === "owner" ||
-                        (target.user_id !== userId && target.role !== "admin"));
+                      selected.role === "owner" ||
+                      (target.user_id !== userId && target.role !== "admin");
                     return canFinalize ? (
                       <button
                         className="primary"
