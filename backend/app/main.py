@@ -1627,7 +1627,6 @@ def stage_team_rotation_item(
 @app.get("/teams/{team_id}/rotations")
 def list_team_rotations(team_id: uuid.UUID, db: DB, device: Auth):
     team, actor = team_access(db, team_id, device)
-    require_team_admin(team, actor)
     job = db.scalar(
         select(TeamRotationJob).where(
             TeamRotationJob.team_id == team.id,
@@ -1635,6 +1634,12 @@ def list_team_rotations(team_id: uuid.UUID, db: DB, device: Auth):
         )
     )
     if job is None:
+        return []
+    visible = actor.role in {"owner", "admin"} or (
+        job.initiator_id == device.user_id
+        and job.target_id == device.user_id
+    )
+    if not visible:
         return []
     return [
         {
