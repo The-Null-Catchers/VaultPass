@@ -1479,17 +1479,27 @@ def rotation_job(
     rotation_id: uuid.UUID,
     device: DeviceSession,
     lock: bool = False,
+    allow_admin: bool = False,
 ) -> TeamRotationJob:
     query = select(TeamRotationJob).where(
         TeamRotationJob.id == rotation_id,
         TeamRotationJob.team_id == team_id,
-        TeamRotationJob.initiator_id == device.user_id,
     )
     if lock:
         query = query.with_for_update()
     job = db.scalar(query)
     if job is None:
         raise HTTPException(404, "Rotation not found")
+    if job.initiator_id != device.user_id:
+        membership = db.get(TeamMember, (team_id, device.user_id))
+        admin_self_leave_takeover = (
+            allow_admin
+            and job.initiator_id == job.target_id
+            and membership is not None
+            and membership.role in {"owner", "admin"}
+        )
+        if not admin_self_leave_takeover:
+            raise HTTPException(404, "Rotation not found")
     if job.expires <= now():
         raise HTTPException(410, "Rotation expired")
     return job
@@ -1504,7 +1514,11 @@ def validate_rotation_target(actor: TeamMember, target: TeamMember | None):
         raise HTTPException(403, "Only the owner can remove administrators")
 
 
-@app.post("/teams/{team_id}/rotations", status_code=201)
+@app.post(
+    "/teams/{team_id}/rotations",
+    status_code=201,
+    dependencies=[Depends(rate_limit)],
+)
 def begin_team_rotation(
     team_id: uuid.UUID,
     body: s.TeamRotationStart,
@@ -1512,9 +1526,14 @@ def begin_team_rotation(
     device: Auth,
 ):
     team, actor = team_access(db, team_id, device, lock=True)
-    require_team_admin(team, actor)
     target = db.get(TeamMember, (team.id, body.target_id))
-    validate_rotation_target(actor, target)
+    self_leave = target is not None and target.user_id == actor.user_id
+    if self_leave:
+        if actor.role == "owner":
+            raise HTTPException(409, "Transfer ownership before leaving the team")
+    else:
+        require_team_admin(team, actor)
+        validate_rotation_target(actor, target)
     if body.expected_key_version != team.key_version:
         raise HTTPException(409, "Team key changed; restart rotation")
     existing = db.scalar(
@@ -1535,7 +1554,11 @@ def begin_team_rotation(
         expires=now() + 3600,
     )
     db.add(job)
-    audit(db, device.user_id, "team_key_rotation_started")
+    audit(
+        db,
+        device.user_id,
+        "team_leave_requested" if self_leave else "team_key_rotation_started",
+    )
     try:
         db.commit()
     except IntegrityError as exc:
@@ -1559,7 +1582,7 @@ def stage_team_rotation_member(
 ):
     team, actor = team_access(db, team_id, device)
     require_team_admin(team, actor)
-    job = rotation_job(db, team_id, rotation_id, device, lock=True)
+    job = rotation_job(db, team_id, rotation_id, device, lock=True, allow_admin=True)
     member = db.get(TeamMember, (team.id, user_id))
     if member is None or user_id == job.target_id:
         raise HTTPException(404, "Remaining member not found")
@@ -1585,7 +1608,7 @@ def stage_team_rotation_item(
 ):
     team, actor = team_access(db, team_id, device)
     require_team_admin(team, actor)
-    job = rotation_job(db, team_id, rotation_id, device, lock=True)
+    job = rotation_job(db, team_id, rotation_id, device, lock=True, allow_admin=True)
     item = db.get(TeamItem, item_id)
     if item is None or item.team_id != team.id or item.purged:
         raise HTTPException(404, "Item not found")
@@ -1601,6 +1624,35 @@ def stage_team_rotation_item(
     return {"ok": True}
 
 
+@app.get("/teams/{team_id}/rotations")
+def list_team_rotations(team_id: uuid.UUID, db: DB, device: Auth):
+    team, actor = team_access(db, team_id, device)
+    job = db.scalar(
+        select(TeamRotationJob).where(
+            TeamRotationJob.team_id == team.id,
+            TeamRotationJob.expires > now(),
+        )
+    )
+    if job is None:
+        return []
+    visible = actor.role in {"owner", "admin"} or (
+        job.initiator_id == device.user_id and job.target_id == device.user_id
+    )
+    if not visible:
+        return []
+    return [
+        {
+            "id": str(job.id),
+            "initiator_id": str(job.initiator_id),
+            "target_id": str(job.target_id),
+            "self_leave": job.initiator_id == job.target_id,
+            "expected_key_version": job.expected_key_version,
+            "new_key_version": job.new_key_version,
+            "expires": job.expires,
+        }
+    ]
+
+
 @app.get("/teams/{team_id}/rotations/{rotation_id}")
 def team_rotation_status(
     team_id: uuid.UUID,
@@ -1608,9 +1660,8 @@ def team_rotation_status(
     db: DB,
     device: Auth,
 ):
-    team, actor = team_access(db, team_id, device)
-    require_team_admin(team, actor)
-    job = rotation_job(db, team_id, rotation_id, device)
+    team, _ = team_access(db, team_id, device)
+    job = rotation_job(db, team_id, rotation_id, device, allow_admin=True)
     member_ids = list(
         db.scalars(
             select(TeamRotationMember.user_id)
@@ -1658,13 +1709,15 @@ def cancel_team_rotation(
     device: Auth,
 ):
     team, actor = team_access(db, team_id, device, lock=True)
-    require_team_admin(team, actor)
     job = db.scalar(
         select(TeamRotationJob)
         .where(TeamRotationJob.id == rotation_id, TeamRotationJob.team_id == team.id)
         .with_for_update()
     )
-    if job is None or (job.initiator_id != device.user_id and actor.role != "owner"):
+    admin_self_leave_takeover = (
+        job is not None and job.initiator_id == job.target_id and actor.role in {"owner", "admin"}
+    )
+    if job is None or (job.initiator_id != device.user_id and not admin_self_leave_takeover):
         raise HTTPException(404, "Rotation not found")
     db.delete(job)
     audit(db, device.user_id, "team_key_rotation_cancelled")
@@ -1681,7 +1734,7 @@ def finalize_team_rotation(
 ):
     team, actor = team_access(db, team_id, device, lock=True)
     require_team_admin(team, actor)
-    job = rotation_job(db, team_id, rotation_id, device, lock=True)
+    job = rotation_job(db, team_id, rotation_id, device, lock=True, allow_admin=True)
     target = db.get(TeamMember, (team.id, job.target_id))
     validate_rotation_target(actor, target)
     if team.key_version != job.expected_key_version:
@@ -1745,6 +1798,8 @@ def finalize_team_rotation(
     team.key_version = job.new_key_version
     db.delete(job)
     audit(db, device.user_id, "team_member_removed_and_key_rotated")
+    if job.initiator_id == job.target_id:
+        audit(db, target.user_id, "team_self_leave_completed")
     audit(db, target.user_id, "team_membership_removed")
     db.commit()
     return {"ok": True, "key_version": team.key_version}
