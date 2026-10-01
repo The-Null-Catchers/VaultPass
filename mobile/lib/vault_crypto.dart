@@ -55,6 +55,104 @@ Future<({Uint8List wrap, String auth})> derive(
   }
 }
 
+Future<Uint8List> _hkdfLabel(Uint8List root, String label) async =>
+    Uint8List.fromList(
+      await (await Hkdf(hmac: Hmac.sha256(), outputLength: 32).deriveKey(
+        secretKey: SecretKey(root),
+        nonce: List.filled(32, 0),
+        info: utf8.encode('vaultpass:v1:$label'),
+      )).extractBytes(),
+    );
+
+Future<({String authSecret, Map<String, dynamic> bundle})> rewrapAccount(
+  String master,
+  String userId,
+  Uint8List accountKey,
+) async {
+  if (master.length < 12) throw ArgumentError('Use at least 12 characters');
+  final salt = hex(randomBytes(16));
+  final derived = await derive(master, salt);
+  try {
+    return (
+      authSecret: derived.auth,
+      bundle: {
+        'salt': salt,
+        'profile': profile,
+        'account_key': await seal(
+          derived.wrap,
+          accountKey,
+          aad('account', [userId]),
+        ),
+      },
+    );
+  } finally {
+    derived.wrap.fillRange(0, derived.wrap.length, 0);
+  }
+}
+
+Future<
+  ({String recoveryKey, String recoveryAuth, Map<String, dynamic> accountKey})
+>
+createRecovery(Uint8List accountKey, String recoveryContext) async {
+  final root = randomBytes(32);
+  final wrap = await _hkdfLabel(root, 'recovery-wrap');
+  final auth = await _hkdfLabel(root, 'recovery-auth');
+  try {
+    return (
+      recoveryKey: 'VP1-${hex(root)}',
+      recoveryAuth: hex(auth),
+      accountKey: await seal(
+        wrap,
+        accountKey,
+        aad('recovery', [recoveryContext]),
+      ),
+    );
+  } finally {
+    root.fillRange(0, root.length, 0);
+    wrap.fillRange(0, wrap.length, 0);
+    auth.fillRange(0, auth.length, 0);
+  }
+}
+
+Uint8List _recoveryBytes(String value) {
+  var normalized = value.trim();
+  if (normalized.toUpperCase().startsWith('VP1-')) {
+    normalized = normalized.substring(4);
+  }
+  normalized = normalized.replaceAll(' ', '');
+  final result = unhex(normalized);
+  if (result.length != 32) {
+    throw const FormatException(
+      'Recovery keys contain 64 hexadecimal characters',
+    );
+  }
+  return result;
+}
+
+Future<({Uint8List accountKey, String recoveryAuth})> unlockRecovery(
+  String value,
+  String recoveryContext,
+  Map<String, dynamic> envelope,
+) async {
+  final root = _recoveryBytes(value);
+  final wrap = await _hkdfLabel(root, 'recovery-wrap');
+  final auth = await _hkdfLabel(root, 'recovery-auth');
+  try {
+    return (
+      accountKey: await open(
+        wrap,
+        envelope,
+        aad('recovery', [recoveryContext]),
+      ),
+      recoveryAuth: hex(auth),
+    );
+  } finally {
+    root.fillRange(0, root.length, 0);
+    wrap.fillRange(0, wrap.length, 0);
+    auth.fillRange(0, auth.length, 0);
+  }
+}
+
 Future<Map<String, dynamic>> seal(
   Uint8List key,
   List<int> data,
