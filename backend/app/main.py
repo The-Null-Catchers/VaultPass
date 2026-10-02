@@ -183,6 +183,37 @@ def unb64url(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
+def ciphertext_bytes(payload: dict) -> int:
+    value = payload.get("ciphertext")
+    if not isinstance(value, str) or not value:
+        return 0
+    try:
+        return len(base64.b64decode(value, validate=True))
+    except (ValueError, base64.binascii.Error):
+        return 0
+
+
+def current_vault_ciphertext_bytes(db: Session, vault_id: uuid.UUID) -> int:
+    return sum(
+        ciphertext_bytes(payload)
+        for payload in db.scalars(
+            select(Item.payload).where(Item.vault_id == vault_id, Item.purged.is_(False))
+        )
+    )
+
+
+def current_team_ciphertext_bytes(db: Session, team_id: uuid.UUID) -> int:
+    return sum(
+        ciphertext_bytes(payload)
+        for payload in db.scalars(
+            select(TeamItem.payload).where(
+                TeamItem.team_id == team_id,
+                TeamItem.purged.is_(False),
+            )
+        )
+    )
+
+
 def credential_descriptor(row: PasskeyCredential) -> PublicKeyCredentialDescriptor:
     transports = []
     for value in row.transports:
@@ -835,6 +866,13 @@ def write(vault_id: uuid.UUID, item_id: uuid.UUID, body: s.Write, db: DB, device
         return serialize(item)
     if (item.version if item else 0) != body.expected_version or (item and item.purged):
         raise HTTPException(409, "Revision conflict; fetch remote and preserve your local edit")
+    incoming_bytes = ciphertext_bytes(body.payload.model_dump())
+    existing_bytes = ciphertext_bytes(item.payload) if item else 0
+    projected_bytes = (
+        current_vault_ciphertext_bytes(db, vault.id) - existing_bytes + incoming_bytes
+    )
+    if projected_bytes > settings.max_vault_ciphertext_bytes:
+        raise HTTPException(409, "Vault ciphertext quota reached")
     if item is None:
         item_count = db.scalar(select(func.count(Item.id)).where(Item.vault_id == vault.id))
         if item_count is not None and item_count >= settings.max_vault_items:
@@ -1398,6 +1436,13 @@ def write_team_item(
         return serialize_team_item(item)
     if (item.version if item else 0) != body.expected_version or (item and item.purged):
         raise HTTPException(409, "Revision conflict; fetch remote and preserve your local edit")
+    incoming_bytes = ciphertext_bytes(body.payload.model_dump())
+    existing_bytes = ciphertext_bytes(item.payload) if item else 0
+    projected_bytes = (
+        current_team_ciphertext_bytes(db, team.id) - existing_bytes + incoming_bytes
+    )
+    if projected_bytes > settings.max_vault_ciphertext_bytes:
+        raise HTTPException(409, "Team vault ciphertext quota reached")
     if item is None:
         item_count = db.scalar(select(func.count(TeamItem.id)).where(TeamItem.team_id == team.id))
         if item_count is not None and item_count >= settings.max_vault_items:
