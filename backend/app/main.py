@@ -198,7 +198,10 @@ def current_vault_ciphertext_bytes(db: Session, vault_id: uuid.UUID) -> int:
     return sum(
         ciphertext_bytes(payload)
         for payload in db.scalars(
-            select(Item.payload).where(Item.vault_id == vault_id, Item.purged.is_(False))
+            select(Item.payload).where(
+                Item.vault_id == vault_id,
+                Item.purged.is_(False),
+            )
         )
     )
 
