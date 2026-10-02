@@ -872,11 +872,9 @@ def write(vault_id: uuid.UUID, item_id: uuid.UUID, body: s.Write, db: DB, device
         raise HTTPException(409, "Revision conflict; fetch remote and preserve your local edit")
     incoming_bytes = ciphertext_bytes(body.payload.model_dump())
     existing_bytes = ciphertext_bytes(item.payload) if item else 0
-    projected_bytes = (
-        current_vault_ciphertext_bytes(db, vault.id)
-        - existing_bytes
-        + incoming_bytes
-    )
+    projected_bytes = current_vault_ciphertext_bytes(db, vault.id)
+    projected_bytes -= existing_bytes
+    projected_bytes += incoming_bytes
     if projected_bytes > settings.max_vault_ciphertext_bytes:
         raise HTTPException(409, "Vault ciphertext quota reached")
     if item is None:
@@ -1444,11 +1442,9 @@ def write_team_item(
         raise HTTPException(409, "Revision conflict; fetch remote and preserve your local edit")
     incoming_bytes = ciphertext_bytes(body.payload.model_dump())
     existing_bytes = ciphertext_bytes(item.payload) if item else 0
-    projected_bytes = (
-        current_team_ciphertext_bytes(db, team.id)
-        - existing_bytes
-        + incoming_bytes
-    )
+    projected_bytes = current_team_ciphertext_bytes(db, team.id)
+    projected_bytes -= existing_bytes
+    projected_bytes += incoming_bytes
     if projected_bytes > settings.max_vault_ciphertext_bytes:
         raise HTTPException(409, "Team vault ciphertext quota reached")
     if item is None:
