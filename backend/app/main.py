@@ -1,4 +1,5 @@
 import base64
+import binascii
 import hashlib
 import json
 import secrets
@@ -189,7 +190,7 @@ def ciphertext_bytes(payload: dict) -> int:
         return 0
     try:
         return len(base64.b64decode(value, validate=True))
-    except (ValueError, base64.binascii.Error):
+    except (ValueError, binascii.Error):
         return 0
 
 
