@@ -303,6 +303,25 @@ def test_resource_caps_preserve_existing_access(client):
             == 200
         )
 
+    with patch.object(settings, "max_vault_ciphertext_bytes", 48):
+        quota_body, _, quota_auth = register(client, "ciphertext-cap@example.com")
+        first_id, second_id = uuid.uuid4(), uuid.uuid4()
+        first_path = f"/vaults/{quota_body['vault_id']}/items/{first_id}"
+        second_path = f"/vaults/{quota_body['vault_id']}/items/{second_id}"
+        payload = {"expected_version": 0, "payload": envelope(), "deleted": False}
+        assert client.put(first_path, json=payload, headers=quota_auth).status_code == 200
+        rejected = client.put(second_path, json=payload, headers=quota_auth)
+        assert rejected.status_code == 409
+        assert rejected.json()["detail"] == "Vault ciphertext quota reached"
+        assert (
+            client.put(
+                first_path,
+                json={**payload, "expected_version": 1},
+                headers=quota_auth,
+            ).status_code
+            == 200
+        )
+
     with patch.object(settings, "max_active_sessions", 2):
         _, original, original_auth = register(client, "sessions@example.com")
         login_body = {
