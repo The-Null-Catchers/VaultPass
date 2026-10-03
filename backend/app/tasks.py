@@ -94,9 +94,7 @@ def cleanup_session(session: Session, current_time: int | None = None):
         )
     )
     for team_item in team_items:
-        team = session.scalar(
-            select(Team).where(Team.id == team_item.team_id).with_for_update()
-        )
+        team = session.scalar(select(Team).where(Team.id == team_item.team_id).with_for_update())
         if team is None:
             continue
         team.sequence += 1
@@ -107,9 +105,7 @@ def cleanup_session(session: Session, current_time: int | None = None):
         team_item.updated = current
         session.execute(delete(TeamRevision).where(TeamRevision.item_id == team_item.id))
 
-    expired_share_ids = list(
-        session.scalars(select(Share.id).where(Share.expires < share_cutoff))
-    )
+    expired_share_ids = list(session.scalars(select(Share.id).where(Share.expires < share_cutoff)))
     if expired_share_ids:
         session.execute(delete(Share).where(Share.id.in_(expired_share_ids)))
     return {
