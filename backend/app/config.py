@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     webauthn_rp_id: str = "localhost"
     webauthn_origin: str = "http://localhost:3000"
     rate_limit: int = Field(default=20, ge=1, le=10000)
+    account_rate_limit: int = Field(default=10, ge=1, le=1000)
     max_request_bytes: int = Field(default=400000, ge=1024, le=10000000)
     max_vault_items: int = Field(default=5000, ge=1, le=100000)
     max_vault_ciphertext_bytes: int = Field(default=50000000, ge=1024, le=1000000000)

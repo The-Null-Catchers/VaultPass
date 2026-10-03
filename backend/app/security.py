@@ -23,19 +23,30 @@ def token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def rate_limit(request: Request):
-    # Use the transport peer; configure a trusted reverse proxy, never arbitrary XFF.
-    peer = request.client.host if request.client else "unknown"
-    key = "limit:" + digest(peer) + ":" + str(now() // 60)
+def increment_limit(key: str, limit: int):
     try:
         with redis.pipeline() as pipe:
             pipe.incr(key)
             pipe.expire(key, 120)
             count, _ = pipe.execute()
-        if count > settings.rate_limit:
+        if count > limit:
             raise HTTPException(429, "Too many requests", headers={"Retry-After": "60"})
     except RedisError as exc:
         raise HTTPException(503, "Security service unavailable") from exc
+
+
+def rate_limit(request: Request):
+    # Use the transport peer; configure a trusted reverse proxy, never arbitrary XFF.
+    peer = request.client.host if request.client else "unknown"
+    key = "limit:peer:" + digest(peer) + ":" + str(now() // 60)
+    increment_limit(key, settings.rate_limit)
+
+
+def account_rate_limit(identifier: str):
+    # Normalize the account handle and hash it before using it in Redis so keys do not expose emails.
+    normalized = identifier.strip().lower()
+    key = "limit:account:" + digest(normalized) + ":" + str(now() // 60)
+    increment_limit(key, settings.account_rate_limit)
 
 
 def authenticated(

@@ -59,7 +59,7 @@ from .models import (
     Verification,
     now,
 )
-from .security import authenticated, digest, rate_limit, token
+from .security import account_rate_limit, authenticated, digest, rate_limit, token
 from .tasks import send_email
 
 app = FastAPI(title="VaultPass ciphertext API", version="0.1.0")
@@ -332,7 +332,9 @@ def register(body: s.Register, db: DB):
 
 @app.post("/auth/login", dependencies=[Depends(rate_limit)])
 def login(body: s.Login, db: DB):
-    user = db.scalar(select(User).where(User.email == str(body.email).lower()).with_for_update())
+    email = str(body.email).lower()
+    account_rate_limit(email)
+    user = db.scalar(select(User).where(User.email == email).with_for_update())
     try:
         check_secret(user, body.auth_secret)
     except HTTPException:
@@ -698,7 +700,9 @@ def recovery_lookup(body: s.RecoveryLookup, db: DB):
 
 @app.post("/auth/recovery/verify", dependencies=[Depends(rate_limit)])
 def recovery_verify(body: s.RecoveryVerify, db: DB):
-    user = db.scalar(select(User).where(User.email == str(body.email).lower()).with_for_update())
+    email = str(body.email).lower()
+    account_rate_limit(email)
+    user = db.scalar(select(User).where(User.email == email).with_for_update())
     row = db.get(RecoveryKey, user.id) if user else None
     check_hash(row.auth_hash if row else None, body.recovery_auth_secret, "Invalid recovery key")
     assert user and row

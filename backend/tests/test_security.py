@@ -8,7 +8,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app.security import rate_limit
+from app.security import account_rate_limit, rate_limit
 
 
 def envelope():
@@ -797,9 +797,19 @@ def test_redis_limit_and_fail_closed():
         with pytest.raises(HTTPException) as exc:
             rate_limit(request)
         assert exc.value.status_code == 429
+        with pytest.raises(HTTPException) as exc:
+            account_rate_limit("Victim@Example.com")
+        assert exc.value.status_code == 429
+        key = redis.pipeline.return_value.__enter__.return_value.incr.call_args.args[0]
+        assert "victim@example.com" not in key
+        assert key.startswith("limit:account:")
+
         redis.pipeline.side_effect = ConnectionError("unavailable")
         with pytest.raises(HTTPException) as exc:
             rate_limit(request)
+        assert exc.value.status_code == 503
+        with pytest.raises(HTTPException) as exc:
+            account_rate_limit("victim@example.com")
         assert exc.value.status_code == 503
 
 
