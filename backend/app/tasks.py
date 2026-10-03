@@ -103,7 +103,9 @@ def cleanup_session(session: Session, current_time: int | None = None):
         item.updated = current
         session.execute(delete(TeamRevision).where(TeamRevision.item_id == item.id))
 
-    expired_shares = session.execute(delete(Share).where(Share.expires < share_cutoff)).rowcount or 0
+    expired_shares = (
+        session.execute(delete(Share).where(Share.expires < share_cutoff)).rowcount or 0
+    )
     return {
         "personal_trash_purged": len(personal_items),
         "team_trash_purged": len(team_items),
