@@ -67,17 +67,19 @@ def cleanup_session(session: Session, current_time: int | None = None):
             .with_for_update()
         )
     )
-    for item in personal_items:
-        vault = session.scalar(select(Vault).where(Vault.id == item.vault_id).with_for_update())
+    for personal_item in personal_items:
+        vault = session.scalar(
+            select(Vault).where(Vault.id == personal_item.vault_id).with_for_update()
+        )
         if vault is None:
             continue
         vault.sequence += 1
-        item.payload = {}
-        item.purged = True
-        item.sequence = vault.sequence
-        item.version += 1
-        item.updated = current
-        session.execute(delete(Revision).where(Revision.item_id == item.id))
+        personal_item.payload = {}
+        personal_item.purged = True
+        personal_item.sequence = vault.sequence
+        personal_item.version += 1
+        personal_item.updated = current
+        session.execute(delete(Revision).where(Revision.item_id == personal_item.id))
 
     team_items = list(
         session.scalars(
@@ -91,25 +93,29 @@ def cleanup_session(session: Session, current_time: int | None = None):
             .with_for_update()
         )
     )
-    for item in team_items:
-        team = session.scalar(select(Team).where(Team.id == item.team_id).with_for_update())
+    for team_item in team_items:
+        team = session.scalar(
+            select(Team).where(Team.id == team_item.team_id).with_for_update()
+        )
         if team is None:
             continue
         team.sequence += 1
-        item.payload = {}
-        item.purged = True
-        item.sequence = team.sequence
-        item.version += 1
-        item.updated = current
-        session.execute(delete(TeamRevision).where(TeamRevision.item_id == item.id))
+        team_item.payload = {}
+        team_item.purged = True
+        team_item.sequence = team.sequence
+        team_item.version += 1
+        team_item.updated = current
+        session.execute(delete(TeamRevision).where(TeamRevision.item_id == team_item.id))
 
-    expired_shares = (
-        session.execute(delete(Share).where(Share.expires < share_cutoff)).rowcount or 0
+    expired_share_ids = list(
+        session.scalars(select(Share.id).where(Share.expires < share_cutoff))
     )
+    if expired_share_ids:
+        session.execute(delete(Share).where(Share.id.in_(expired_share_ids)))
     return {
         "personal_trash_purged": len(personal_items),
         "team_trash_purged": len(team_items),
-        "expired_shares_deleted": expired_shares,
+        "expired_shares_deleted": len(expired_share_ids),
     }
 
 
