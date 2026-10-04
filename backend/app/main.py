@@ -451,6 +451,25 @@ def account(db: DB, device: Auth):
     }
 
 
+@app.get("/account/security-notifications")
+def security_notifications(db: DB, device: Auth):
+    user = db.get(User, device.user_id)
+    assert user
+    return {"new_device_email_enabled": user.new_device_email_enabled}
+
+
+@app.patch("/account/security-notifications", dependencies=[Depends(rate_limit)])
+def update_security_notifications(body: s.SecurityNotifications, db: DB, device: Auth):
+    user = db.scalar(select(User).where(User.id == device.user_id).with_for_update())
+    assert user
+    changed = user.new_device_email_enabled != body.new_device_email_enabled
+    user.new_device_email_enabled = body.new_device_email_enabled
+    if changed:
+        audit(db, user.id, "security_notifications_updated")
+    db.commit()
+    return {"new_device_email_enabled": user.new_device_email_enabled}
+
+
 @app.get("/account/passkeys")
 def passkeys(db: DB, device: Auth):
     return [
