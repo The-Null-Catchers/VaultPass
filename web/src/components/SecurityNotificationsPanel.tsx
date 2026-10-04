@@ -2,11 +2,10 @@
 
 import { useEffect, useState } from "react";
 
-import { api } from "../lib/api";
-
-type SecurityNotifications = {
-  new_device_email_enabled: boolean;
-};
+import {
+  getSecurityNotifications,
+  updateSecurityNotifications,
+} from "../lib/securityNotifications";
 
 type Props = {
   onNotice?: (message: string) => void;
@@ -19,12 +18,17 @@ export function SecurityNotificationsPanel({ onNotice }: Props) {
 
   useEffect(() => {
     let active = true;
-    void api<SecurityNotifications>("/account/security-notifications")
+    void getSecurityNotifications()
       .then((value) => {
         if (active) setEnabled(value.new_device_email_enabled);
       })
       .catch((reason: unknown) => {
-        if (active) setError(reason instanceof Error ? reason.message : "Could not load security notification settings");
+        if (active)
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Could not load security notification settings",
+          );
       });
     return () => {
       active = false;
@@ -38,9 +42,7 @@ export function SecurityNotificationsPanel({ onNotice }: Props) {
     setSaving(true);
     setError("");
     try {
-      const value = await api<SecurityNotifications>("/account/security-notifications", "PATCH", {
-        new_device_email_enabled: next,
-      });
+      const value = await updateSecurityNotifications(next);
       setEnabled(value.new_device_email_enabled);
       onNotice?.(
         value.new_device_email_enabled
@@ -49,7 +51,11 @@ export function SecurityNotificationsPanel({ onNotice }: Props) {
       );
     } catch (reason) {
       setEnabled(previous);
-      setError(reason instanceof Error ? reason.message : "Could not update security notification settings");
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not update security notification settings",
+      );
     } finally {
       setSaving(false);
     }
@@ -59,7 +65,8 @@ export function SecurityNotificationsPanel({ onNotice }: Props) {
     <section className="panel" aria-labelledby="security-notifications-title">
       <h2 id="security-notifications-title">Security notifications</h2>
       <p>
-        Get an email after a new device successfully signs in. The message includes the device label only and never contains vault data.
+        Get an email after a new device successfully signs in. The message includes the device
+        label only and never contains vault data.
       </p>
       {enabled === null ? (
         <p aria-live="polite">Loading security notification settings…</p>
