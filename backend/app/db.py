@@ -95,18 +95,14 @@ def enforce_ciphertext_storage_quota(session: Session, flush_context, instances)
     team_current_replacements = defaultdict(int)
 
     dirty_items = {
-        value.id: value
-        for value in session.dirty
-        if isinstance(value, Item) and not value.purged
+        value.id: value for value in session.dirty if isinstance(value, Item) and not value.purged
     }
     dirty_team_items = {
         value.id: value
         for value in session.dirty
         if isinstance(value, TeamItem) and not value.purged
     }
-    revised_item_ids = {
-        value.item_id for value in session.new if isinstance(value, Revision)
-    }
+    revised_item_ids = {value.item_id for value in session.new if isinstance(value, Revision)}
     revised_team_item_ids = {
         value.item_id for value in session.new if isinstance(value, TeamRevision)
     }
@@ -122,18 +118,14 @@ def enforce_ciphertext_storage_quota(session: Session, flush_context, instances)
         if item is None:
             continue
         vault_deltas[item.vault_id] += _ciphertext_bytes(item.payload)
-        vault_deltas[item.vault_id] -= _revision_eviction_credit(
-            connection, Revision, item_id
-        )
+        vault_deltas[item.vault_id] -= _revision_eviction_credit(connection, Revision, item_id)
 
     for item_id in revised_team_item_ids:
         item = dirty_team_items.get(item_id)
         if item is None:
             continue
         team_deltas[item.team_id] += _ciphertext_bytes(item.payload)
-        team_deltas[item.team_id] -= _revision_eviction_credit(
-            connection, TeamRevision, item_id
-        )
+        team_deltas[item.team_id] -= _revision_eviction_credit(connection, TeamRevision, item_id)
 
     # Team key-rotation finalization replaces current ciphertext and deliberately
     # drops old TeamRevision rows instead of creating a new revision. Keep the
