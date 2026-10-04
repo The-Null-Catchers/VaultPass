@@ -103,27 +103,14 @@ def enforce_ciphertext_storage_quota(session: Session, flush_context, instances)
         for value in session.dirty
         if isinstance(value, TeamItem) and not value.purged
     }
-
-    # Do not persist a historical ciphertext copy when a version bump carries the
-    # exact same encrypted payload. It adds no recoverable state and would consume
-    # quota solely because the client repeated a no-op update.
-    personal_revisions = [value for value in session.new if isinstance(value, Revision)]
-    for revision in personal_revisions:
-        personal_item = dirty_items.get(revision.item_id)
-        if personal_item is not None and personal_item.payload == revision.payload:
-            session.expunge(revision)
-    team_revisions = [value for value in session.new if isinstance(value, TeamRevision)]
-    for team_revision in team_revisions:
-        team_item = dirty_team_items.get(team_revision.item_id)
-        if team_item is not None and team_item.payload == team_revision.payload:
-            session.expunge(team_revision)
-
-    revised_item_ids: set[uuid.UUID] = {
-        value.item_id for value in session.new if isinstance(value, Revision)
+    personal_revisions: dict[uuid.UUID, Revision] = {
+        value.item_id: value for value in session.new if isinstance(value, Revision)
     }
-    revised_team_item_ids: set[uuid.UUID] = {
-        value.item_id for value in session.new if isinstance(value, TeamRevision)
+    team_revisions: dict[uuid.UUID, TeamRevision] = {
+        value.item_id: value for value in session.new if isinstance(value, TeamRevision)
     }
+    revised_item_ids = set(personal_revisions)
+    revised_team_item_ids = set(team_revisions)
 
     for value in session.new:
         if isinstance(value, Item) and not value.purged:
@@ -164,12 +151,42 @@ def enforce_ciphertext_storage_quota(session: Session, flush_context, instances)
         team_current_replacements[team_item.team_id] += _ciphertext_bytes(team_item.payload)
         team_current_replacements[team_item.team_id] -= _ciphertext_bytes(old_payload)
 
-    for vault_id, delta in vault_deltas.items():
-        if _vault_storage_bytes(connection, vault_id) + delta > settings.max_vault_ciphertext_bytes:
+    for vault_id, delta in list(vault_deltas.items()):
+        stored = _vault_storage_bytes(connection, vault_id)
+        if stored + delta > settings.max_vault_ciphertext_bytes:
+            # A version bump that carries byte-for-byte identical ciphertext adds
+            # no recoverable secret state. Under quota pressure, omit only that
+            # redundant pending history row rather than blocking the existing item
+            # update. Normal writes still retain the revision and consume quota.
+            for item_id, revision in list(personal_revisions.items()):
+                personal_item = dirty_items.get(item_id)
+                if (
+                    personal_item is not None
+                    and personal_item.vault_id == vault_id
+                    and personal_item.payload == revision.payload
+                    and revision in session.new
+                ):
+                    session.expunge(revision)
+                    delta -= _ciphertext_bytes(personal_item.payload)
+            vault_deltas[vault_id] = delta
+        if stored + delta > settings.max_vault_ciphertext_bytes:
             raise HTTPException(409, "Vault ciphertext quota reached")
 
-    for team_id, delta in team_deltas.items():
-        if _team_storage_bytes(connection, team_id) + delta > settings.max_vault_ciphertext_bytes:
+    for team_id, delta in list(team_deltas.items()):
+        stored = _team_storage_bytes(connection, team_id)
+        if stored + delta > settings.max_vault_ciphertext_bytes:
+            for item_id, team_revision in list(team_revisions.items()):
+                team_item = dirty_team_items.get(item_id)
+                if (
+                    team_item is not None
+                    and team_item.team_id == team_id
+                    and team_item.payload == team_revision.payload
+                    and team_revision in session.new
+                ):
+                    session.expunge(team_revision)
+                    delta -= _ciphertext_bytes(team_item.payload)
+            team_deltas[team_id] = delta
+        if stored + delta > settings.max_vault_ciphertext_bytes:
             raise HTTPException(409, "Team vault ciphertext quota reached")
 
     for team_id, delta in team_current_replacements.items():
