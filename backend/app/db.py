@@ -113,10 +113,10 @@ def enforce_ciphertext_storage_quota(session: Session, flush_context, instances)
         if personal_item is not None and personal_item.payload == revision.payload:
             session.expunge(revision)
     team_revisions = [value for value in session.new if isinstance(value, TeamRevision)]
-    for revision in team_revisions:
-        team_item = dirty_team_items.get(revision.item_id)
-        if team_item is not None and team_item.payload == revision.payload:
-            session.expunge(revision)
+    for team_revision in team_revisions:
+        team_item = dirty_team_items.get(team_revision.item_id)
+        if team_item is not None and team_item.payload == team_revision.payload:
+            session.expunge(team_revision)
 
     revised_item_ids: set[uuid.UUID] = {
         value.item_id for value in session.new if isinstance(value, Revision)
