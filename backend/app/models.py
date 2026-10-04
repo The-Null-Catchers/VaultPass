@@ -25,6 +25,7 @@ class User(Base):
     auth_hash: Mapped[str] = mapped_column(String(256))
     bundle: Mapped[dict[str, Any]] = mapped_column(JSON)
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    new_device_email_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created: Mapped[int] = mapped_column(default=now)
 
 
