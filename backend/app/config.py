@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     max_request_bytes: int = Field(default=400000, ge=1024, le=10000000)
     max_vault_items: int = Field(default=5000, ge=1, le=100000)
     max_vault_ciphertext_bytes: int = Field(default=50000000, ge=1024, le=1000000000)
+    max_vault_revision_ciphertext_bytes: int = Field(
+        default=50000000, ge=1024, le=1000000000
+    )
     max_active_sessions: int = Field(default=20, ge=1, le=1000)
     max_passkeys: int = Field(default=10, ge=1, le=100)
     max_teams_per_user: int = Field(default=25, ge=1, le=1000)
