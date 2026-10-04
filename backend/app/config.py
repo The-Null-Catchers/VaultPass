@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     max_passkeys: int = Field(default=10, ge=1, le=100)
     max_teams_per_user: int = Field(default=25, ge=1, le=1000)
     max_team_members: int = Field(default=100, ge=2, le=1000)
+    trash_retention_days: int = Field(default=30, ge=1, le=3650)
+    expired_share_retention_days: int = Field(default=30, ge=1, le=3650)
     audit_retention_days: int = Field(default=365, ge=30, le=3650)
 
 
