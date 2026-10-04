@@ -103,6 +103,21 @@ def enforce_ciphertext_storage_quota(session: Session, flush_context, instances)
         for value in session.dirty
         if isinstance(value, TeamItem) and not value.purged
     }
+
+    # Do not persist a historical ciphertext copy when a version bump carries the
+    # exact same encrypted payload. It adds no recoverable state and would consume
+    # quota solely because the client repeated a no-op update.
+    personal_revisions = [value for value in session.new if isinstance(value, Revision)]
+    for revision in personal_revisions:
+        personal_item = dirty_items.get(revision.item_id)
+        if personal_item is not None and personal_item.payload == revision.payload:
+            session.expunge(revision)
+    team_revisions = [value for value in session.new if isinstance(value, TeamRevision)]
+    for revision in team_revisions:
+        team_item = dirty_team_items.get(revision.item_id)
+        if team_item is not None and team_item.payload == revision.payload:
+            session.expunge(revision)
+
     revised_item_ids: set[uuid.UUID] = {
         value.item_id for value in session.new if isinstance(value, Revision)
     }
