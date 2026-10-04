@@ -1,4 +1,5 @@
 import os
+from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite://")
 import pytest
@@ -32,7 +33,10 @@ def client():
 
     app.dependency_overrides[db] = test_db
     app.dependency_overrides[rate_limit] = lambda: None
-    with TestClient(app) as client:
-        yield client
+    # Unit tests must not contact Redis/SMTP when a login commits a security alert.
+    # Individual tests can nest their own patch when they need to assert the call.
+    with patch("app.tasks.send_email.delay"):
+        with TestClient(app) as client:
+            yield client
     app.dependency_overrides.clear()
     engine.dispose()
