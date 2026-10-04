@@ -8,10 +8,12 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import settings
-from .models import Item, Revision, TeamItem, TeamRevision
+from .models import DeviceSession, Item, Revision, TeamItem, TeamRevision, User
 
 engine = create_engine(settings.database_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
+
+_NEW_DEVICE_EMAILS = "new_device_security_emails"
 
 
 def _ciphertext_bytes(payload: dict | None) -> int:
@@ -192,6 +194,60 @@ def enforce_ciphertext_storage_quota(session: Session, flush_context, instances)
     for team_id, delta in team_current_replacements.items():
         if _current_team_bytes(connection, team_id) + delta > settings.max_vault_ciphertext_bytes:
             raise HTTPException(409, "Team vault ciphertext quota reached")
+
+
+@event.listens_for(Session, "before_flush")
+def queue_new_device_security_email(session: Session, flush_context, instances):
+    """Queue a post-commit security email for additional device sessions.
+
+    Registration creates the account's first session and must not look like a
+    suspicious new-device event. Later password or passkey sign-ins create a new
+    DeviceSession and are eligible when the user has left the notification on.
+    The SMTP/Celery side effect is deferred until after the transaction commits so
+    failed logins and rolled-back session creation never generate false alerts.
+    """
+
+    connection = session.connection()
+    queued: list[tuple[str, str]] = session.info.setdefault(_NEW_DEVICE_EMAILS, [])
+    for value in session.new:
+        if not isinstance(value, DeviceSession):
+            continue
+        user = session.get(User, value.user_id)
+        if user is None or not user.new_device_email_enabled:
+            continue
+        prior_session = connection.execute(
+            select(DeviceSession.id).where(DeviceSession.user_id == value.user_id).limit(1)
+        ).scalar_one_or_none()
+        if prior_session is None:
+            continue
+        queued.append((user.email, value.name))
+
+
+@event.listens_for(Session, "after_commit")
+def dispatch_new_device_security_email(session: Session):
+    queued = session.info.pop(_NEW_DEVICE_EMAILS, [])
+    if not queued:
+        return
+    # Import lazily to avoid the tasks -> db import cycle during module loading.
+    from .tasks import send_email
+
+    for recipient, device_name in queued:
+        send_email.delay(
+            recipient,
+            "New VaultPass sign-in",
+            (
+                f"A new device signed in to your VaultPass account: {device_name}.\n\n"
+                "If this was you, no action is required. If you do not recognize "
+                "this sign-in, revoke the device from VaultPass and change your "
+                "master password. VaultPass never includes vault contents in "
+                "security emails."
+            ),
+        )
+
+
+@event.listens_for(Session, "after_rollback")
+def discard_new_device_security_email(session: Session):
+    session.info.pop(_NEW_DEVICE_EMAILS, None)
 
 
 def db():
