@@ -4,6 +4,7 @@ import uuid
 from collections import defaultdict
 
 from fastapi import HTTPException
+from kombu.exceptions import OperationalError as BrokerOperationalError
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -70,9 +71,6 @@ def _current_team_bytes(connection, team_id) -> int:
 
 
 def _revision_eviction_credit(connection, model, item_id) -> int:
-    # A normal item write retains only the newest 20 historical revisions. Before
-    # the pending revision is inserted, every existing revision after the newest
-    # 19 will be evicted by that write and can be credited against the projection.
     rows = connection.execute(
         select(model.payload)
         .where(model.item_id == item_id)
@@ -84,14 +82,6 @@ def _revision_eviction_credit(connection, model, item_id) -> int:
 
 @event.listens_for(Session, "before_flush")
 def enforce_ciphertext_storage_quota(session: Session, flush_context, instances):
-    """Keep current ciphertext plus retained history inside each vault quota.
-
-    The API's request-time checks bound current ciphertext. This persistence-level
-    guard closes the remaining gap where repeated updates could grow encrypted
-    revision history without consuming that quota. It also preserves the rolling
-    20-revision window by crediting revisions that the same write will evict.
-    """
-
     connection = session.connection()
     vault_deltas: defaultdict[uuid.UUID, int] = defaultdict(int)
     team_deltas: defaultdict[uuid.UUID, int] = defaultdict(int)
@@ -138,10 +128,6 @@ def enforce_ciphertext_storage_quota(session: Session, flush_context, instances)
             connection, TeamRevision, item_id
         )
 
-    # Team key-rotation finalization replaces current ciphertext and deliberately
-    # drops old TeamRevision rows instead of creating a new revision. Keep the
-    # existing current-ciphertext cap enforced for that internal replacement path
-    # without charging history that is removed by the same transaction.
     for item_id, team_item in dirty_team_items.items():
         if item_id in revised_team_item_ids:
             continue
@@ -156,10 +142,6 @@ def enforce_ciphertext_storage_quota(session: Session, flush_context, instances)
     for vault_id, delta in list(vault_deltas.items()):
         stored = _vault_storage_bytes(connection, vault_id)
         if stored + delta > settings.max_vault_ciphertext_bytes:
-            # A version bump that carries byte-for-byte identical ciphertext adds
-            # no recoverable secret state. Under quota pressure, omit only that
-            # redundant pending history row rather than blocking the existing item
-            # update. Normal writes still retain the revision and consume quota.
             for item_id, revision in list(personal_revisions.items()):
                 personal_item = dirty_items.get(item_id)
                 if (
@@ -198,15 +180,6 @@ def enforce_ciphertext_storage_quota(session: Session, flush_context, instances)
 
 @event.listens_for(Session, "before_flush")
 def queue_new_device_security_email(session: Session, flush_context, instances):
-    """Queue a post-commit security email for additional device sessions.
-
-    Registration creates the account's first session and must not look like a
-    suspicious new-device event. Later password or passkey sign-ins create a new
-    DeviceSession and are eligible when the user has left the notification on.
-    The SMTP/Celery side effect is deferred until after the transaction commits so
-    failed logins and rolled-back session creation never generate false alerts.
-    """
-
     connection = session.connection()
     queued: list[tuple[str, str]] = session.info.setdefault(_NEW_DEVICE_EMAILS, [])
     for value in session.new:
@@ -228,21 +201,26 @@ def dispatch_new_device_security_email(session: Session):
     queued = session.info.pop(_NEW_DEVICE_EMAILS, [])
     if not queued:
         return
-    # Import lazily to avoid the tasks -> db import cycle during module loading.
     from .tasks import send_email
 
     for recipient, device_name in queued:
-        send_email.delay(
-            recipient,
-            "New VaultPass sign-in",
-            (
-                f"A new device signed in to your VaultPass account: {device_name}.\n\n"
-                "If this was you, no action is required. If you do not recognize "
-                "this sign-in, revoke the device from VaultPass and change your "
-                "master password. VaultPass never includes vault contents in "
-                "security emails."
-            ),
-        )
+        try:
+            send_email.delay(
+                recipient,
+                "New VaultPass sign-in",
+                (
+                    f"A new device signed in to your VaultPass account: {device_name}.\n\n"
+                    "If this was you, no action is required. If you do not recognize "
+                    "this sign-in, revoke the device from VaultPass and change your "
+                    "master password. VaultPass never includes vault contents in "
+                    "security emails."
+                ),
+            )
+        except (BrokerOperationalError, OSError):
+            # Notification infrastructure is deliberately non-blocking for auth.
+            # The account session has already committed; a temporary broker outage
+            # must never turn a successful sign-in into an HTTP 500.
+            continue
 
 
 @event.listens_for(Session, "after_rollback")
