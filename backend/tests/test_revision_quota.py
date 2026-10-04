@@ -171,9 +171,7 @@ def test_team_rotation_replacement_still_obeys_current_ciphertext_cap(client):
         == 201
     )
     assert (
-        client.post(
-            f"/team-invitations/{invitation_id}/accept", headers=member_auth
-        ).status_code
+        client.post(f"/team-invitations/{invitation_id}/accept", headers=member_auth).status_code
         == 200
     )
 
