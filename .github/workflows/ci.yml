@@ -103,6 +103,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Validate Nginx edge configuration
+        run: |
+          cat > /tmp/vaultpass-nginx.conf <<'EOF'
+          events {}
+          http {
+            include /etc/nginx/vaultpass/nginx-rate-limit-zones.conf;
+            server {
+              listen 8080;
+              include /etc/nginx/vaultpass/nginx.conf;
+            }
+          }
+          EOF
+          docker run --rm \
+            -v "$PWD/deploy:/etc/nginx/vaultpass:ro" \
+            -v /tmp/vaultpass-nginx.conf:/etc/nginx/nginx.conf:ro \
+            nginx:1.26-alpine nginx -t
       - run: cp .env.example .env
       - run: docker compose config --quiet && docker compose build
       - run: docker compose up -d
