@@ -30,12 +30,47 @@ def register(client, email="alerts@example.com"):
     return body, result.json()
 
 
-def test_additional_device_login_dispatches_security_email_after_commit(client):
-    from app.db import db
-    from app.main import app
-    from app.models import User
+def auth_headers(session):
+    return {"Authorization": f"Bearer {session['access_token']}"}
 
-    body, _ = register(client)
+
+def test_security_notification_preference_defaults_on_and_can_be_updated(client):
+    _, session = register(client, "preferences@example.com")
+    headers = auth_headers(session)
+
+    current = client.get("/account/security-notifications", headers=headers)
+    assert current.status_code == 200, current.text
+    assert current.json() == {"new_device_email_enabled": True}
+
+    updated = client.patch(
+        "/account/security-notifications",
+        headers=headers,
+        json={"new_device_email_enabled": False},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json() == {"new_device_email_enabled": False}
+
+    persisted = client.get("/account/security-notifications", headers=headers)
+    assert persisted.status_code == 200, persisted.text
+    assert persisted.json() == {"new_device_email_enabled": False}
+
+    events = client.get("/events", headers=headers)
+    assert events.status_code == 200, events.text
+    assert any(row["event"] == "security_notifications_updated" for row in events.json())
+
+
+def test_security_notification_preference_rejects_unknown_fields(client):
+    _, session = register(client, "strict-preferences@example.com")
+    result = client.patch(
+        "/account/security-notifications",
+        headers=auth_headers(session),
+        json={"new_device_email_enabled": False, "unexpected": True},
+    )
+    assert result.status_code == 422
+
+
+def test_additional_device_login_dispatches_security_email_after_commit(client):
+    body, session = register(client)
     login = {
         "email": body["email"],
         "auth_secret": body["auth_secret"],
@@ -52,13 +87,12 @@ def test_additional_device_login_dispatches_security_email_after_commit(client):
         assert "Pixel 7" in message
         assert "vault contents" in message.lower()
 
-    session_generator = app.dependency_overrides[db]()
-    database = next(session_generator)
-    user = database.get(User, uuid.UUID(body["id"]))
-    assert user is not None
-    user.new_device_email_enabled = False
-    database.commit()
-    session_generator.close()
+    disabled = client.patch(
+        "/account/security-notifications",
+        headers=auth_headers(session),
+        json={"new_device_email_enabled": False},
+    )
+    assert disabled.status_code == 200, disabled.text
 
     with patch("app.tasks.send_email.delay") as send:
         result = client.post("/auth/login", json={**login, "device": "Laptop"})
