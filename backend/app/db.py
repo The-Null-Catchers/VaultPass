@@ -1,5 +1,6 @@
 import base64
 import binascii
+import uuid
 from collections import defaultdict
 
 from fastapi import HTTPException
@@ -90,20 +91,22 @@ def enforce_ciphertext_storage_quota(session: Session, flush_context, instances)
     """
 
     connection = session.connection()
-    vault_deltas = defaultdict(int)
-    team_deltas = defaultdict(int)
-    team_current_replacements = defaultdict(int)
+    vault_deltas: defaultdict[uuid.UUID, int] = defaultdict(int)
+    team_deltas: defaultdict[uuid.UUID, int] = defaultdict(int)
+    team_current_replacements: defaultdict[uuid.UUID, int] = defaultdict(int)
 
-    dirty_items = {
+    dirty_items: dict[uuid.UUID, Item] = {
         value.id: value for value in session.dirty if isinstance(value, Item) and not value.purged
     }
-    dirty_team_items = {
+    dirty_team_items: dict[uuid.UUID, TeamItem] = {
         value.id: value
         for value in session.dirty
         if isinstance(value, TeamItem) and not value.purged
     }
-    revised_item_ids = {value.item_id for value in session.new if isinstance(value, Revision)}
-    revised_team_item_ids = {
+    revised_item_ids: set[uuid.UUID] = {
+        value.item_id for value in session.new if isinstance(value, Revision)
+    }
+    revised_team_item_ids: set[uuid.UUID] = {
         value.item_id for value in session.new if isinstance(value, TeamRevision)
     }
 
@@ -114,24 +117,28 @@ def enforce_ciphertext_storage_quota(session: Session, flush_context, instances)
             team_deltas[value.team_id] += _ciphertext_bytes(value.payload)
 
     for item_id in revised_item_ids:
-        item = dirty_items.get(item_id)
-        if item is None:
+        personal_item = dirty_items.get(item_id)
+        if personal_item is None:
             continue
-        vault_deltas[item.vault_id] += _ciphertext_bytes(item.payload)
-        vault_deltas[item.vault_id] -= _revision_eviction_credit(connection, Revision, item_id)
+        vault_deltas[personal_item.vault_id] += _ciphertext_bytes(personal_item.payload)
+        vault_deltas[personal_item.vault_id] -= _revision_eviction_credit(
+            connection, Revision, item_id
+        )
 
     for item_id in revised_team_item_ids:
-        item = dirty_team_items.get(item_id)
-        if item is None:
+        team_item = dirty_team_items.get(item_id)
+        if team_item is None:
             continue
-        team_deltas[item.team_id] += _ciphertext_bytes(item.payload)
-        team_deltas[item.team_id] -= _revision_eviction_credit(connection, TeamRevision, item_id)
+        team_deltas[team_item.team_id] += _ciphertext_bytes(team_item.payload)
+        team_deltas[team_item.team_id] -= _revision_eviction_credit(
+            connection, TeamRevision, item_id
+        )
 
     # Team key-rotation finalization replaces current ciphertext and deliberately
     # drops old TeamRevision rows instead of creating a new revision. Keep the
     # existing current-ciphertext cap enforced for that internal replacement path
     # without charging history that is removed by the same transaction.
-    for item_id, item in dirty_team_items.items():
+    for item_id, team_item in dirty_team_items.items():
         if item_id in revised_team_item_ids:
             continue
         old_payload = connection.execute(
@@ -139,8 +146,8 @@ def enforce_ciphertext_storage_quota(session: Session, flush_context, instances)
         ).scalar_one_or_none()
         if old_payload is None:
             continue
-        team_current_replacements[item.team_id] += _ciphertext_bytes(item.payload)
-        team_current_replacements[item.team_id] -= _ciphertext_bytes(old_payload)
+        team_current_replacements[team_item.team_id] += _ciphertext_bytes(team_item.payload)
+        team_current_replacements[team_item.team_id] -= _ciphertext_bytes(old_payload)
 
     for vault_id, delta in vault_deltas.items():
         if _vault_storage_bytes(connection, vault_id) + delta > settings.max_vault_ciphertext_bytes:
