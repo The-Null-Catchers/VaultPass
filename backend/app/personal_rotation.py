@@ -47,9 +47,7 @@ def rotation_snapshot(db: Session, vault: Vault) -> list[dict]:
             "deleted": item.deleted,
         }
         for item in db.scalars(
-            select(Item)
-            .where(Item.vault_id == vault.id, Item.purged.is_(False))
-            .order_by(Item.id)
+            select(Item).where(Item.vault_id == vault.id, Item.purged.is_(False)).order_by(Item.id)
         )
     ]
 
@@ -146,9 +144,7 @@ def rotation_progress(db: Session, vault: Vault, job: PersonalVaultRotationJob) 
     required = rotation_snapshot(db, vault)
     uploaded = list(
         db.scalars(
-            select(PersonalVaultRotationItem).where(
-                PersonalVaultRotationItem.rotation_id == job.id
-            )
+            select(PersonalVaultRotationItem).where(PersonalVaultRotationItem.rotation_id == job.id)
         )
     )
     return {
@@ -173,9 +169,7 @@ def finalize_rotation(db: Session, vault: Vault, job: PersonalVaultRotationJob) 
     )
     staged = list(
         db.scalars(
-            select(PersonalVaultRotationItem).where(
-                PersonalVaultRotationItem.rotation_id == job.id
-            )
+            select(PersonalVaultRotationItem).where(PersonalVaultRotationItem.rotation_id == job.id)
         )
     )
     staged_by_id = {row.item_id: row for row in staged}
