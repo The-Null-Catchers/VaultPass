@@ -18,7 +18,8 @@ class FakeVaultStore extends VaultStore {
     calls.add({'path': path, 'method': method, 'body': body});
     if (method == 'PATCH') {
       if (failPatch) throw ApiFailure(500, 'save failed');
-      value = (body as Map<String, dynamic>)['new_device_email_enabled'] == true;
+      value =
+          (body as Map<String, dynamic>)['new_device_email_enabled'] == true;
     }
     return {'new_device_email_enabled': value};
   }
@@ -34,7 +35,9 @@ void main() {
     await tester.pumpWidget(subject(store));
     await tester.pumpAndSettle();
 
-    final switchFinder = find.byKey(const ValueKey('new-device-email-switch'));
+    final switchFinder = find.byKey(
+      const ValueKey('new-device-email-switch'),
+    );
     expect(switchFinder, findsOneWidget);
     expect(tester.widget<SwitchListTile>(switchFinder).value, isTrue);
     expect(store.calls.first['path'], '/account/security-notifications');
@@ -53,7 +56,9 @@ void main() {
     await tester.pumpWidget(subject(store));
     await tester.pumpAndSettle();
 
-    final switchFinder = find.byKey(const ValueKey('new-device-email-switch'));
+    final switchFinder = find.byKey(
+      const ValueKey('new-device-email-switch'),
+    );
     await tester.tap(switchFinder);
     await tester.pumpAndSettle();
 
