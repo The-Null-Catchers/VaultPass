@@ -299,3 +299,31 @@ class TeamRotationItem(Base):
     )
     expected_version: Mapped[int] = mapped_column(Integer)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+
+class PersonalVaultRotationJob(Base):
+    __tablename__ = "personal_vault_rotation_jobs"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    vault_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("vaults.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    initiator_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    expected_key_version: Mapped[int] = mapped_column(Integer)
+    new_key_version: Mapped[int] = mapped_column(Integer)
+    wrapped_key: Mapped[dict[str, Any]] = mapped_column(JSON)
+    expires: Mapped[int]
+    created: Mapped[int] = mapped_column(default=now)
+
+
+class PersonalVaultRotationItem(Base):
+    __tablename__ = "personal_vault_rotation_items"
+    rotation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("personal_vault_rotation_jobs.id", ondelete="CASCADE"), primary_key=True
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("vault_items.id", ondelete="CASCADE"), primary_key=True
+    )
+    expected_version: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
