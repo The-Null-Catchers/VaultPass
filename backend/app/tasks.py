@@ -1,12 +1,10 @@
-import smtplib
-from email.message import EmailMessage
-
 from celery import Celery
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import SessionLocal
+from .mailer import deliver_email
 from .models import (
     Audit,
     DeviceSession,
@@ -37,17 +35,7 @@ celery.conf.update(
 @celery.task(autoretry_for=(OSError,), retry_backoff=True, max_retries=5)
 def send_email(recipient: str, subject: str, body: str):
     # Only transactional account messages; never vault content. Do not log arguments.
-    message = EmailMessage()
-    message["From"] = settings.mail_from
-    message["To"] = recipient
-    message["Subject"] = subject
-    message.set_content(body)
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
-        if settings.environment == "production":
-            smtp.starttls()
-        if settings.smtp_username:
-            smtp.login(settings.smtp_username, settings.smtp_password)
-        smtp.send_message(message)
+    deliver_email(recipient, subject, body)
 
 
 def cleanup_session(session: Session, current_time: int | None = None):
