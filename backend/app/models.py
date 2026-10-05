@@ -36,6 +36,7 @@ class Vault(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     wrapped_key: Mapped[dict[str, Any]] = mapped_column(JSON)
+    key_version: Mapped[int] = mapped_column(Integer, default=1)
     sequence: Mapped[int] = mapped_column(Integer, default=0)
 
 
