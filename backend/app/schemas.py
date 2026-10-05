@@ -102,8 +102,20 @@ class Refresh(Strict):
 
 class Write(Strict):
     expected_version: int = Field(ge=0)
+    expected_key_version: int | None = Field(default=None, ge=1)
     payload: Envelope
     deleted: bool = False
+
+
+class PersonalVaultRotationStart(Strict):
+    id: UUID
+    expected_key_version: int = Field(ge=1)
+    wrapped_key: Envelope
+
+
+class PersonalVaultRotationItem(Strict):
+    expected_version: int = Field(ge=1)
+    payload: Envelope
 
 
 class Rewrap(Strict):
