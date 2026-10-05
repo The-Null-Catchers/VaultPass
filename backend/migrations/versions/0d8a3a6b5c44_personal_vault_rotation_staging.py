@@ -23,12 +23,12 @@ def upgrade():
         sa.ForeignKeyConstraint(["initiator_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["vault_id"], ["vaults.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("vault_id"),
     )
     op.create_index(
         "ix_personal_vault_rotation_jobs_vault_id",
         "personal_vault_rotation_jobs",
         ["vault_id"],
+        unique=True,
     )
     op.create_index(
         "ix_personal_vault_rotation_jobs_initiator_id",
