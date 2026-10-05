@@ -7,7 +7,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Send one VaultPass transactional email through the configured SMTP provider."
     )
-    parser.add_argument("--recipient", required=True, help="Inbox that should receive the smoke email")
+    parser.add_argument(
+        "--recipient", required=True, help="Inbox that should receive the smoke email"
+    )
     args = parser.parse_args()
 
     deliver_email(
