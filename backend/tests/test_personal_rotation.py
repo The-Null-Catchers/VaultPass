@@ -80,13 +80,13 @@ def test_staged_rotation_replaces_all_current_ciphertext_atomically(client):
         progress = rotation_progress(database, vault, job)
         assert progress["new_key_version"] == 2
         assert progress["uploaded_items"] == 0
-        assert progress["required_items"] == [
-            {"id": str(item_id), "version": 1, "deleted": False}
-        ]
+        assert progress["required_items"] == [{"id": str(item_id), "version": 1, "deleted": False}]
 
         stage_item(database, vault, job, item_id, 1, envelope(b"r"))
         assert rotation_progress(database, vault, job)["complete"] is True
-        result = finalize_rotation(database, vault, get_rotation(database, vault, rotation_id, lock=True))
+        result = finalize_rotation(
+            database, vault, get_rotation(database, vault, rotation_id, lock=True)
+        )
         database.commit()
 
         assert result["key_version"] == 2
@@ -107,11 +107,14 @@ def test_rotation_detects_item_changed_after_staging(client):
     body, auth = register(client)
     item_id = uuid.uuid4()
     item_path = f"/vaults/{body['vault_id']}/items/{item_id}"
-    assert client.put(
-        item_path,
-        headers=auth,
-        json={"expected_version": 0, "payload": envelope(b"1"), "deleted": False},
-    ).status_code == 200
+    assert (
+        client.put(
+            item_path,
+            headers=auth,
+            json={"expected_version": 0, "payload": envelope(b"1"), "deleted": False},
+        ).status_code
+        == 200
+    )
 
     session_generator, database = session_from_fixture()
     try:
@@ -131,11 +134,14 @@ def test_rotation_detects_item_changed_after_staging(client):
     finally:
         session_generator.close()
 
-    assert client.put(
-        item_path,
-        headers=auth,
-        json={"expected_version": 1, "payload": envelope(b"3"), "deleted": False},
-    ).status_code == 200
+    assert (
+        client.put(
+            item_path,
+            headers=auth,
+            json={"expected_version": 1, "payload": envelope(b"3"), "deleted": False},
+        ).status_code
+        == 200
+    )
 
     session_generator, database = session_from_fixture()
     try:
