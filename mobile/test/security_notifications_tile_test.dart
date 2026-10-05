@@ -18,26 +18,28 @@ class FakeVaultStore extends VaultStore {
     calls.add({'path': path, 'method': method, 'body': body});
     if (method == 'PATCH') {
       if (failPatch) throw ApiFailure(500, 'save failed');
-      value =
-          (body as Map<String, dynamic>)['new_device_email_enabled'] == true;
+      final payload = body as Map<String, dynamic>;
+      value = payload['new_device_email_enabled'] == true;
     }
     return {'new_device_email_enabled': value};
   }
 }
 
-Widget subject(FakeVaultStore store) => MaterialApp(
-  home: Scaffold(body: SecurityNotificationsTile(store: store)),
-);
+Widget subject(FakeVaultStore store) {
+  return MaterialApp(
+    home: Scaffold(body: SecurityNotificationsTile(store: store)),
+  );
+}
 
 void main() {
+  const switchKey = ValueKey('new-device-email-switch');
+
   testWidgets('loads and updates the authenticated preference', (tester) async {
     final store = FakeVaultStore();
     await tester.pumpWidget(subject(store));
     await tester.pumpAndSettle();
 
-    final switchFinder = find.byKey(
-      const ValueKey('new-device-email-switch'),
-    );
+    final switchFinder = find.byKey(switchKey);
     expect(switchFinder, findsOneWidget);
     expect(tester.widget<SwitchListTile>(switchFinder).value, isTrue);
     expect(store.calls.first['path'], '/account/security-notifications');
@@ -56,9 +58,7 @@ void main() {
     await tester.pumpWidget(subject(store));
     await tester.pumpAndSettle();
 
-    final switchFinder = find.byKey(
-      const ValueKey('new-device-email-switch'),
-    );
+    final switchFinder = find.byKey(switchKey);
     await tester.tap(switchFinder);
     await tester.pumpAndSettle();
 
