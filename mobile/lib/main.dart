@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'vault_crypto.dart';
 import 'vault_store.dart';
 import 'team_vault_panel.dart';
+import 'security_notifications_tile.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -700,6 +701,7 @@ class _VaultHomeState extends State<VaultHome> {
                       value: widget.dark,
                       onChanged: widget.onTheme,
                     ),
+                    SecurityNotificationsTile(store: store),
                     const ListTile(
                       title: Text('Automatic lock'),
                       subtitle: Text(
