@@ -29,6 +29,7 @@ void main() {
         store.vaultKey = randomBytes(32);
         store.vaultId = 'test-vault';
         store.userId = 'test-user';
+        store.keyVersion = 3;
         store.access = 'fake-test-access';
         await store.save({
           'title': 'NEVER STORE THIS PLAINTEXT',
@@ -36,10 +37,10 @@ void main() {
           'notes': 'PRIVATE FAKE NOTE',
         });
         expect(store.pending.length, 1);
-        expect(
-          await store.file.readAsString(),
-          isNot(contains('PRIVATE FAKE NOTE')),
-        );
+        expect(store.pending.single['expected_key_version'], 3);
+        final cached = await store.file.readAsString();
+        expect(cached, contains('"key_version":3'));
+        expect(cached, isNot(contains('PRIVATE FAKE NOTE')));
         final row = store.items.single;
         await store.save({
           'title': 'changed',
@@ -48,11 +49,13 @@ void main() {
         }, existing: row);
         expect(store.pending.length, 1);
         expect(store.pending.single['expected_version'], 0);
+        expect(store.pending.single['expected_key_version'], 3);
         await expectLater(store.synchronize(), throwsA(isA<ApiFailure>()));
         expect(store.pending.length, 1);
         final key = store.vaultKey!;
         store.lock();
         expect(store.items, isEmpty);
+        expect(store.keyVersion, 1);
         expect(key.every((b) => b == 0), true);
       } finally {
         store.dispose();

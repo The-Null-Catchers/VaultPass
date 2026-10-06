@@ -6,6 +6,7 @@ import 'package:vaultpass/vault_store.dart';
 class FakeVaultStore extends VaultStore {
   bool value = true;
   bool failPatch = false;
+  bool rotated = false;
   final calls = <Map<String, dynamic>>[];
 
   @override
@@ -22,6 +23,13 @@ class FakeVaultStore extends VaultStore {
       value = payload['new_device_email_enabled'] == true;
     }
     return {'new_device_email_enabled': value};
+  }
+
+  @override
+  Future<int> rotatePersonalVaultKey() async {
+    rotated = true;
+    keyVersion = 2;
+    return keyVersion;
   }
 }
 
@@ -64,5 +72,21 @@ void main() {
 
     expect(tester.widget<SwitchListTile>(switchFinder).value, isTrue);
     expect(find.textContaining('Could not save preference'), findsOneWidget);
+  });
+
+  testWidgets('confirms and runs personal vault key rotation', (tester) async {
+    final store = FakeVaultStore();
+    await tester.pumpWidget(subject(store));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('personal-vault-key-rotation')));
+    await tester.pumpAndSettle();
+    expect(find.text('Rotate vault encryption key?'), findsOneWidget);
+
+    await tester.tap(find.text('Rotate key'));
+    await tester.pumpAndSettle();
+
+    expect(store.rotated, isTrue);
+    expect(find.textContaining('rotated to epoch 2'), findsOneWidget);
   });
 }
