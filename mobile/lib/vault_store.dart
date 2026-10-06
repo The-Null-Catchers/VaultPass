@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
+import 'personal_rotation.dart';
 import 'vault_crypto.dart';
 import 'team_crypto.dart';
 
@@ -51,7 +52,7 @@ class VaultStore extends ChangeNotifier {
   bool loading = false, teamLoading = false;
   bool emailVerified = false, recoveryEnabled = false;
   String recoveryContext = '';
-  int generation = 0;
+  int generation = 0, keyVersion = 1;
   bool get unlocked => vaultKey != null;
   bool get teamCanEdit =>
       selectedTeam != null && selectedTeam!['role'] != 'read_only';
@@ -192,6 +193,7 @@ class VaultStore extends ChangeNotifier {
     }
     final vaults = await request('/vaults') as List;
     vaultId = vaults.first['id'];
+    keyVersion = vaults.first['key_version'] as int? ?? 1;
     wrappedVault = Map<String, dynamic>.from(vaults.first['wrapped_key']);
     vaultKey = await open(
       accountKey!,
@@ -223,6 +225,7 @@ class VaultStore extends ChangeNotifier {
     if (expectedUser == null) {
       userId = saved['user_id'];
       vaultId = saved['vault_id'];
+      keyVersion = saved['key_version'] as int? ?? 1;
       bundle = Map<String, dynamic>.from(saved['bundle']);
       wrappedVault = Map<String, dynamic>.from(saved['wrapped_key']);
       email = saved['email'];
@@ -242,6 +245,7 @@ class VaultStore extends ChangeNotifier {
       jsonEncode({
         'user_id': userId,
         'vault_id': vaultId,
+        'key_version': keyVersion,
         'email': email,
         'bundle': bundle,
         'wrapped_key': wrappedVault,
@@ -360,6 +364,7 @@ class VaultStore extends ChangeNotifier {
     pending.removeWhere((p) => p['id'] == id);
     pending.add({
       'id': id,
+      'expected_key_version': keyVersion,
       'expected_version': expected,
       'payload': payload,
       'deleted': deleted,
@@ -395,10 +400,18 @@ class VaultStore extends ChangeNotifier {
       // A conflict never destroys the local encrypted edit. User can keep it as a copy.
       while (pending.isNotEmpty) {
         final p = pending.first;
+        final pendingKeyVersion = p['expected_key_version'] as int? ?? 1;
+        if (pendingKeyVersion != keyVersion) {
+          throw StateError(
+            'Vault key changed while offline edits are pending. '
+            'Pending ciphertext was preserved and will not be overwritten.',
+          );
+        }
         await request(
           '/vaults/$vaultId/items/${p['id']}',
           method: 'PUT',
           body: {
+            'expected_key_version': pendingKeyVersion,
             'expected_version': p['expected_version'],
             'payload': p['payload'],
             'deleted': p['deleted'],
@@ -411,6 +424,13 @@ class VaultStore extends ChangeNotifier {
       final remote = <Map<String, dynamic>>[];
       while (more) {
         final result = await request('/vaults/$vaultId/sync?after=$cursor');
+        final remoteKeyVersion = result['key_version'] as int? ?? 1;
+        if (remoteKeyVersion != keyVersion) {
+          throw StateError(
+            'Vault key changed on another device. Lock and sign in online '
+            'to unwrap the current vault key before syncing new ciphertext.',
+          );
+        }
         remote.addAll(
           (result['items'] as List).map((e) => Map<String, dynamic>.from(e)),
         );
@@ -424,6 +444,49 @@ class VaultStore extends ChangeNotifier {
       loading = false;
       notifyListeners();
     }
+  }
+
+  Future<int> rotatePersonalVaultKey() async {
+    if (!unlocked || accountKey == null || vaultKey == null) {
+      throw StateError('Unlock your vault first');
+    }
+    if (loading) throw StateError('Wait for synchronization to finish');
+    await synchronize();
+    if (pending.isNotEmpty) {
+      throw StateError('Synchronize pending personal edits before rotating');
+    }
+    final snapshot = items
+        .map(
+          (entry) => {
+            'id': entry['id'],
+            'version': entry['version'],
+            'deleted': entry['deleted'] == true,
+            'data': Map<String, dynamic>.from(entry['data'] as Map),
+          },
+        )
+        .toList();
+    final result = await rotatePersonalVault(
+      userId: userId,
+      vaultId: vaultId,
+      currentKeyVersion: keyVersion,
+      accountKey: accountKey!,
+      entries: snapshot,
+      request: (path, {method = 'GET', body}) =>
+          request(path, method: method, body: body),
+    );
+
+    final oldKey = vaultKey!;
+    vaultKey = result.vaultKey;
+    keyVersion = result.keyVersion;
+    wrappedVault = Map<String, dynamic>.from(result.wrappedKey);
+    oldKey.fillRange(0, oldKey.length, 0);
+    rows = [];
+    pending = [];
+    items = [];
+    await persist();
+    await synchronize();
+    notifyListeners();
+    return keyVersion;
   }
 
   Future<void> preserveConflictAsCopy() async {
@@ -1015,6 +1078,7 @@ class VaultStore extends ChangeNotifier {
     accountKey = null;
     vaultKey = null;
     teamKey = null;
+    keyVersion = 1;
     items = [];
     teamItems = [];
     teams = [];
