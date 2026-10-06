@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ShieldCheck, LockKeyhole, Search, Plus, KeyRound, FileText, CreditCard, UserRound, Star, Trash2, WandSparkles, Activity, MonitorSmartphone, Settings, LogOut, Copy, Eye, EyeOff, Menu, X, RefreshCw, Download, Upload, Clock3, Code2, UsersRound } from "lucide-react";
 import { api, clearTokens, setTokens } from "../lib/api";
+import { rotatePersonalVault } from "../lib/personalRotation";
 import { Bundle, Envelope, PROFILE, context, createAccount, createRecovery, decryptJSON, derive, encryptJSON, open, rewrap, unlock, unlockRecovery } from "../lib/crypto";
 import { breachCount, generate, health } from "../lib/generator";
 import { createIdentity, fingerprint, encryptShare, decryptShare } from "../lib/sharing";
@@ -121,7 +122,9 @@ export default function Home() {
     [notice, setNotice] = useState("");
   const accountKey = useRef<Uint8Array | null>(null),
     vaultKey = useRef<Uint8Array | null>(null),
-    vaultId = useRef("");
+    vaultId = useRef(""),
+    vaultKeyVersion = useRef(1);
+  const [vaultKeyEpoch, setVaultKeyEpoch] = useState(1);
   const [items, setItems] = useState<Entry[]>([]),
     [section, setSection] = useState("All items"),
     [query, setQuery] = useState(""),
@@ -195,8 +198,11 @@ export default function Home() {
       const page = await api<{
         cursor: number;
         has_more: boolean;
+        key_version: number;
         items: Row[];
       }>(`/vaults/${vaultId.current}/sync?after=${cursor}`);
+      if (page.key_version !== vaultKeyVersion.current)
+        throw new Error("Vault encryption key changed. Lock and unlock again to load the current key.");
       cursor = page.cursor;
       more = page.has_more;
       for (const row of page.items)
@@ -274,9 +280,11 @@ export default function Home() {
       }
       setTokens(result.access_token, result.refresh_token);
       accountKey.current = await unlock(master, result.user_id, result.bundle);
-      const vaults = await api<{ id: string; wrapped_key: Envelope }[]>("/vaults");
+      const vaults = await api<{ id: string; wrapped_key: Envelope; key_version: number }[]>("/vaults");
       if (!vaults.length) throw new Error("Account has no vault");
       vaultId.current = vaults[0].id;
+      vaultKeyVersion.current = vaults[0].key_version;
+      setVaultKeyEpoch(vaults[0].key_version);
       vaultKey.current = await open(accountKey.current, vaults[0].wrapped_key, context("vault", result.user_id, vaultId.current));
       setMaster("");
       setSession({ ...result, access_token: "", refresh_token: "" });
@@ -339,6 +347,7 @@ export default function Home() {
     const payload = await encryptJSON(vaultKey.current!, data, context("item", vaultId.current, id, version + 1));
     await api(`/vaults/${vaultId.current}/items/${id}`, "PUT", {
       expected_version: version,
+      expected_key_version: vaultKeyVersion.current,
       payload,
       deleted,
     });
@@ -347,6 +356,38 @@ export default function Home() {
     setEditing(false);
     setDraft(blank());
     notify("Encrypted and synchronized");
+  };
+  const rotateVaultEncryptionKey = () => {
+    if (!window.confirm("Rotate the personal vault encryption key now? All retained items will be re-encrypted locally before an atomic server cutover.")) return;
+    void run(async () => {
+      if (!session || !accountKey.current || !vaultKey.current || !vaultId.current)
+        throw new Error("Unlock the vault before rotating its encryption key");
+      const currentEntries = await sync();
+      const previousKey = vaultKey.current;
+      const rotated = await rotatePersonalVault({
+        userId: session.user_id,
+        vaultId: vaultId.current,
+        currentKeyVersion: vaultKeyVersion.current,
+        accountKey: accountKey.current,
+        entries: currentEntries.map((entry) => ({
+          id: entry.id,
+          version: entry.version,
+          deleted: entry.deleted,
+          data: entry.data,
+        })),
+      });
+      vaultKey.current = rotated.vaultKey;
+      vaultKeyVersion.current = rotated.keyVersion;
+      setVaultKeyEpoch(rotated.keyVersion);
+      previousKey.fill(0);
+      try {
+        await sync();
+      } catch (syncError) {
+        lock();
+        throw syncError;
+      }
+      notify(`Personal vault encryption key rotated to epoch ${rotated.keyVersion}`);
+    });
   };
   const navigate = (name: string) => {
     setSection(name);
@@ -886,6 +927,17 @@ export default function Home() {
                 </button>
               </section>
               <section className="panel">
+                <h2>Vault encryption key</h2>
+                <p>
+                  Current key epoch: <strong>{vaultKeyEpoch}</strong>. Rotation generates a fresh 256-bit key in this browser and re-encrypts every retained vault item locally.
+                </p>
+                <button disabled={busy} onClick={rotateVaultEncryptionKey}>
+                  <RefreshCw size={16} />
+                  Rotate vault encryption key
+                </button>
+                <p className="warning">Keep this tab open until rotation finishes. Plaintext keys and item contents never leave this device.</p>
+              </section>
+              <section className="panel">
                 <h2>Recovery key</h2>
                 <p>{recoveryEnabled ? "A recovery key is enrolled. It is never sent to VaultPass and will be consumed after recovery." : "Create a one-time recovery key that wraps your account key locally."}</p>
                 {shownRecovery ? (
@@ -1305,7 +1357,7 @@ export default function Home() {
                           onClick={() => {
                             if (window.confirm("Permanently delete this item and its history?"))
                               void run(async () => {
-                                await api(`/vaults/${vaultId.current}/items/${selectedItem.id}?expected_version=${selectedItem.version}`, "DELETE");
+                                await api(`/vaults/${vaultId.current}/items/${selectedItem.id}?expected_version=${selectedItem.version}&expected_key_version=${vaultKeyVersion.current}`, "DELETE");
                                 setSelected(null);
                                 await sync();
                               });
