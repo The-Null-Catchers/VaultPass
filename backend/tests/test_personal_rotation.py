@@ -157,6 +157,117 @@ def test_rotation_detects_item_changed_after_staging(client):
         session_generator.close()
 
 
+def test_personal_rotation_api_rotates_and_enforces_epoch(client):
+    body, auth = register(client)
+    vault_id = body["vault_id"]
+    item_id = uuid.uuid4()
+    item_path = f"/vaults/{vault_id}/items/{item_id}"
+    create = client.put(
+        item_path,
+        headers=auth,
+        json={"expected_version": 0, "payload": envelope(b"o"), "deleted": False},
+    )
+    assert create.status_code == 200, create.text
+
+    vaults = client.get("/vaults", headers=auth)
+    assert vaults.status_code == 200
+    assert vaults.json() == [
+        {"id": vault_id, "wrapped_key": body["wrapped_vault_key"], "key_version": 1}
+    ]
+
+    rotation_id = str(uuid.uuid4())
+    start = client.post(
+        f"/vaults/{vault_id}/rotations",
+        headers=auth,
+        json={
+            "id": rotation_id,
+            "expected_key_version": 1,
+            "wrapped_key": envelope(b"k"),
+        },
+    )
+    assert start.status_code == 201, start.text
+    assert start.json()["new_key_version"] == 2
+    assert start.json()["required_items"] == [{"id": str(item_id), "version": 1, "deleted": False}]
+
+    listed = client.get(f"/vaults/{vault_id}/rotations", headers=auth)
+    assert listed.status_code == 200
+    assert [row["id"] for row in listed.json()] == [rotation_id]
+
+    staged = client.put(
+        f"/vaults/{vault_id}/rotations/{rotation_id}/items/{item_id}",
+        headers=auth,
+        json={"expected_version": 1, "payload": envelope(b"r")},
+    )
+    assert staged.status_code == 200, staged.text
+
+    status = client.get(f"/vaults/{vault_id}/rotations/{rotation_id}", headers=auth)
+    assert status.status_code == 200
+    assert status.json()["complete"] is True
+
+    finalized = client.post(
+        f"/vaults/{vault_id}/rotations/{rotation_id}/finalize",
+        headers=auth,
+    )
+    assert finalized.status_code == 200, finalized.text
+    assert finalized.json()["key_version"] == 2
+    assert finalized.json()["rotated_items"] == 1
+
+    sync = client.get(f"/vaults/{vault_id}/sync", headers=auth)
+    assert sync.status_code == 200
+    assert sync.json()["key_version"] == 2
+    assert sync.json()["items"][0]["payload"] == envelope(b"r")
+    assert client.get(f"/vaults/{vault_id}/rotations", headers=auth).json() == []
+
+    stale = client.put(
+        item_path,
+        headers=auth,
+        json={
+            "expected_version": 2,
+            "expected_key_version": 1,
+            "payload": envelope(b"s"),
+            "deleted": False,
+        },
+    )
+    assert stale.status_code == 409
+
+    missing_epoch = client.put(
+        item_path,
+        headers=auth,
+        json={"expected_version": 2, "payload": envelope(b"s"), "deleted": False},
+    )
+    assert missing_epoch.status_code == 409
+
+    current = client.put(
+        item_path,
+        headers=auth,
+        json={
+            "expected_version": 2,
+            "expected_key_version": 2,
+            "payload": envelope(b"s"),
+            "deleted": False,
+        },
+    )
+    assert current.status_code == 200, current.text
+
+
+def test_personal_rotation_api_can_cancel(client):
+    body, auth = register(client)
+    rotation_id = str(uuid.uuid4())
+    path = f"/vaults/{body['vault_id']}/rotations/{rotation_id}"
+    started = client.post(
+        f"/vaults/{body['vault_id']}/rotations",
+        headers=auth,
+        json={
+            "id": rotation_id,
+            "expected_key_version": 1,
+            "wrapped_key": envelope(b"k"),
+        },
+    )
+    assert started.status_code == 201, started.text
+    assert client.delete(path, headers=auth).status_code == 200
+    assert client.get(path, headers=auth).status_code == 404
+
+
 def test_old_clients_are_rejected_after_first_rotation_epoch():
     vault = Vault(
         id=uuid.uuid4(),

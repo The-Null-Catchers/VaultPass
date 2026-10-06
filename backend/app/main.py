@@ -41,6 +41,7 @@ from .models import (
     Item,
     PasskeyChallenge,
     PasskeyCredential,
+    PersonalVaultRotationJob,
     RecoveryAttempt,
     RecoveryKey,
     RefreshToken,
@@ -58,6 +59,15 @@ from .models import (
     Vault,
     Verification,
     now,
+)
+from .personal_rotation import (
+    cancel_rotation,
+    finalize_rotation,
+    get_rotation,
+    rotation_progress,
+    stage_item,
+    start_rotation,
+    validate_personal_write_epoch,
 )
 from .security import account_rate_limit, authenticated, digest, rate_limit, token
 from .tasks import send_email
@@ -837,7 +847,7 @@ def events(db: DB, device: Auth):
 @app.get("/vaults")
 def vaults(db: DB, device: Auth):
     return [
-        {"id": str(v.id), "wrapped_key": v.wrapped_key}
+        {"id": str(v.id), "wrapped_key": v.wrapped_key, "key_version": v.key_version}
         for v in db.scalars(select(Vault).where(Vault.owner_id == device.user_id))
     ]
 
@@ -859,6 +869,7 @@ def sync(vault_id: uuid.UUID, db: DB, device: Auth, after: int = 0):
     result = {
         "cursor": cursor,
         "has_more": cursor < vault.sequence,
+        "key_version": vault.key_version,
         "items": [serialize(i) for i in rows],
     }
     db.commit()
@@ -879,6 +890,7 @@ def serialize(item: Item):
 @app.put("/vaults/{vault_id}/items/{item_id}")
 def write(vault_id: uuid.UUID, item_id: uuid.UUID, body: s.Write, db: DB, device: Auth):
     vault = owned(db, vault_id, device, lock=True)
+    validate_personal_write_epoch(vault, body.expected_key_version)
     item = db.get(Item, item_id)
     if item and item.vault_id != vault.id:
         raise HTTPException(404, "Item not found")
@@ -942,8 +954,16 @@ def history(vault_id: uuid.UUID, item_id: uuid.UUID, db: DB, device: Auth):
 
 
 @app.delete("/vaults/{vault_id}/items/{item_id}")
-def purge(vault_id: uuid.UUID, item_id: uuid.UUID, expected_version: int, db: DB, device: Auth):
+def purge(
+    vault_id: uuid.UUID,
+    item_id: uuid.UUID,
+    expected_version: int,
+    db: DB,
+    device: Auth,
+    expected_key_version: int | None = None,
+):
     vault = owned(db, vault_id, device, lock=True)
+    validate_personal_write_epoch(vault, expected_key_version)
     item = db.get(Item, item_id)
     if not item or item.vault_id != vault.id:
         raise HTTPException(404, "Item not found")
@@ -956,6 +976,107 @@ def purge(vault_id: uuid.UUID, item_id: uuid.UUID, expected_version: int, db: DB
     db.execute(delete(Revision).where(Revision.item_id == item.id))
     db.commit()
     return {"ok": True}
+
+
+@app.post(
+    "/vaults/{vault_id}/rotations",
+    status_code=201,
+    dependencies=[Depends(rate_limit)],
+)
+def begin_personal_rotation(
+    vault_id: uuid.UUID,
+    body: s.PersonalVaultRotationStart,
+    db: DB,
+    device: Auth,
+):
+    vault = owned(db, vault_id, device, lock=True)
+    try:
+        job = start_rotation(
+            db,
+            vault,
+            device.user_id,
+            body.id,
+            body.expected_key_version,
+            body.wrapped_key.model_dump(),
+        )
+        audit(db, device.user_id, "personal_vault_key_rotation_started")
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Personal vault rotation already exists") from exc
+    return rotation_progress(db, vault, job)
+
+
+@app.get("/vaults/{vault_id}/rotations")
+def list_personal_rotations(vault_id: uuid.UUID, db: DB, device: Auth):
+    vault = owned(db, vault_id, device)
+    job = db.scalar(
+        select(PersonalVaultRotationJob).where(
+            PersonalVaultRotationJob.vault_id == vault.id,
+            PersonalVaultRotationJob.expires > now(),
+        )
+    )
+    return [] if job is None else [rotation_progress(db, vault, job)]
+
+
+@app.get("/vaults/{vault_id}/rotations/{rotation_id}")
+def personal_rotation_status(
+    vault_id: uuid.UUID,
+    rotation_id: uuid.UUID,
+    db: DB,
+    device: Auth,
+):
+    vault = owned(db, vault_id, device)
+    job = get_rotation(db, vault, rotation_id)
+    return rotation_progress(db, vault, job)
+
+
+@app.put("/vaults/{vault_id}/rotations/{rotation_id}/items/{item_id}")
+def stage_personal_rotation_item(
+    vault_id: uuid.UUID,
+    rotation_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: s.PersonalVaultRotationItem,
+    db: DB,
+    device: Auth,
+):
+    vault = owned(db, vault_id, device, lock=True)
+    job = get_rotation(db, vault, rotation_id, lock=True)
+    stage_item(db, vault, job, item_id, body.expected_version, body.payload.model_dump())
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/vaults/{vault_id}/rotations/{rotation_id}")
+def cancel_personal_rotation(
+    vault_id: uuid.UUID,
+    rotation_id: uuid.UUID,
+    db: DB,
+    device: Auth,
+):
+    vault = owned(db, vault_id, device, lock=True)
+    cancel_rotation(db, vault, rotation_id)
+    audit(db, device.user_id, "personal_vault_key_rotation_cancelled")
+    db.commit()
+    return {"ok": True}
+
+
+@app.post(
+    "/vaults/{vault_id}/rotations/{rotation_id}/finalize",
+    dependencies=[Depends(rate_limit)],
+)
+def finalize_personal_rotation(
+    vault_id: uuid.UUID,
+    rotation_id: uuid.UUID,
+    db: DB,
+    device: Auth,
+):
+    vault = owned(db, vault_id, device, lock=True)
+    job = get_rotation(db, vault, rotation_id, lock=True)
+    result = finalize_rotation(db, vault, job)
+    audit(db, device.user_id, "personal_vault_key_rotated")
+    db.commit()
+    return result
 
 
 @app.post("/sharing/keys", dependencies=[Depends(rate_limit)])

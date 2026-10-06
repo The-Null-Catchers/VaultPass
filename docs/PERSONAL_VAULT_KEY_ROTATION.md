@@ -1,35 +1,51 @@
 # Personal vault key rotation
 
-VaultPass personal-vault encryption is zero-knowledge: the server never receives the clear vault key or decrypted item contents. Automatic rotation therefore has to be client-driven while the server provides concurrency control and an atomic ciphertext cutover.
+VaultPass personal-vault encryption is zero-knowledge: the server never receives the clear vault key or decrypted item contents. Rotation is therefore client-driven while the server provides authenticated staging, concurrency control, and an atomic ciphertext cutover.
 
-## Foundation in this change
+## Key epochs
 
-Personal vaults now carry a monotonically increasing `key_version` (starting at `1`), matching the key-epoch concept already used by team vaults. Existing rows are migrated to epoch `1` without changing wrapped keys or ciphertext.
+Personal vaults carry a monotonically increasing `key_version`, starting at `1`. Existing vault rows were migrated to epoch `1` without changing the active wrapped key or ciphertext.
 
-This foundation is intentionally non-breaking: current item read/write APIs keep their existing behavior until the staged rotation protocol and both clients are updated together.
+`GET /vaults` and `GET /vaults/{vault_id}/sync` expose the current `key_version` so clients can associate their unlocked key material and offline state with the server epoch.
 
-## Required follow-up protocol
+Personal item writes accept `expected_key_version`. Epoch-1 clients remain compatible before the first rotation, but after a vault reaches epoch 2 or later, writes and purges that omit the epoch or present an older epoch are rejected with `409`. This prevents a stale client from reintroducing ciphertext encrypted under an obsolete vault key.
 
-The completed rotation flow should:
+## Staged rotation API
 
-1. Lock the personal vault at the API layer and record its current key epoch.
-2. Have the authenticated client generate a fresh random 256-bit vault key locally.
-3. Re-wrap the new vault key under the in-memory account key using the existing vault AAD context.
-4. Re-encrypt every retained current item locally using fresh GCM nonces and the existing per-item AAD/version rules.
-5. Upload replacements in bounded staged batches rather than one oversized request.
-6. Atomically verify that the vault epoch and every item version still match the rotation snapshot.
-7. Replace the wrapped vault key, replace current item ciphertext, discard old retained revision ciphertext, increment `key_version`, and advance sync sequencing in one transaction.
-8. Reject stale writes from clients using the old key epoch so old ciphertext cannot be reintroduced after cutover.
-9. Refresh encrypted offline caches after successful rotation while preserving unsynced/conflicting local ciphertext for explicit recovery.
+The authenticated owner can drive a rotation using these endpoints:
+
+- `POST /vaults/{vault_id}/rotations` starts a 30-minute staging job. The body contains a client-generated rotation ID, the expected current key epoch, and the new vault key wrapped under the account key.
+- `GET /vaults/{vault_id}/rotations` returns the active non-expired rotation, if any.
+- `GET /vaults/{vault_id}/rotations/{rotation_id}` returns the required item snapshot, uploaded item count, target key epoch, expiry, and completion state.
+- `PUT /vaults/{vault_id}/rotations/{rotation_id}/items/{item_id}` stages one client-side re-encrypted item envelope and its expected current item version.
+- `DELETE /vaults/{vault_id}/rotations/{rotation_id}` cancels the staged rotation without changing the active wrapped key or active item ciphertext.
+- `POST /vaults/{vault_id}/rotations/{rotation_id}/finalize` locks the current vault state, validates every retained item/version and the key epoch, applies all staged ciphertext, purges retained revision ciphertext, updates the wrapped vault key, increments `key_version`, advances sync sequencing, and removes the staging job in one transaction.
+
+The server receives only encrypted envelopes and an account-key-wrapped vault key. It never receives the newly generated clear vault key. Backend regression coverage exercises successful cutover, cancellation, stale and missing epochs, and current-epoch writes through these public routes.
+
+## Client rotation flow
+
+A web or Flutter client completing automatic rotation must:
+
+1. Sync and confirm the current `key_version` and item versions.
+2. Generate a fresh random 256-bit vault key locally using the platform CSPRNG.
+3. Wrap the new vault key under the already-unlocked account key using the existing vault-key envelope/AAD contract.
+4. Start a rotation using the current key epoch.
+5. Decrypt each retained current item locally with the old vault key, then re-encrypt it locally under the new vault key using a fresh AES-GCM nonce and the existing item AAD contract.
+6. Stage each replacement with the corresponding current item version. Uploads are deliberately item-scoped so request-size limits remain bounded and interrupted work can be resumed during the job lifetime.
+7. Re-read progress and finalize only after every required item has a staged replacement.
+8. On successful finalize, replace the in-memory/offline vault key and cache epoch with the returned new `key_version`, then perform a fresh sync.
+9. On `409`, discard the staged assumption, preserve any unsynced local edits, sync current state, and restart/reconcile rather than overwriting remote ciphertext.
+
+Until web and Flutter implement this client-side flow, the presence of the backend protocol does **not** close the automatic personal-vault rotation release gate.
 
 ## Security invariants
 
-- The API must never generate, unwrap, log, or inspect the clear personal vault key.
-- Rotation must fail closed on concurrent item changes or a changed key epoch.
-- A failed/incomplete staged rotation must leave the active wrapped key and active ciphertext unchanged.
-- Finalization must be atomic.
-- Old revision ciphertext must not remain queryable after a successful key cutover.
-- Rotation payloads remain subject to existing request, item-count, and ciphertext-byte limits.
+- The API never generates, unwraps, logs, or inspects the clear personal vault key.
+- Rotation fails closed on a changed key epoch, missing staged item, or concurrent item-version change.
+- A failed, cancelled, or expired staged rotation leaves the active wrapped key and active ciphertext unchanged.
+- Finalization is atomic.
+- Old retained revision ciphertext is deleted during successful cutover so it cannot be queried using the new epoch.
+- Rotation payloads remain subject to existing request and ciphertext-byte limits.
+- New GCM nonces are generated by clients for every re-encrypted envelope; nonce reuse across old and new keys/items is not permitted by the client protocol.
 - Account password changes remain a separate account-key rewrap operation and must not silently rotate the personal vault key.
-
-This document describes the implementation contract; adding the epoch column alone does not close the automatic personal-vault rotation release gate.
