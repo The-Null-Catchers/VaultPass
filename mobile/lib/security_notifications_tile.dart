@@ -97,7 +97,9 @@ class _SecurityNotificationsTileState extends State<SecurityNotificationsTile> {
       final epoch = await widget.store.rotatePersonalVaultKey();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Vault encryption key rotated to epoch $epoch.')),
+        SnackBar(
+          content: Text('Vault encryption key rotated to epoch $epoch.'),
+        ),
       );
     } catch (exception) {
       if (!mounted) return;
