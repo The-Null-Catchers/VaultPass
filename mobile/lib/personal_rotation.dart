@@ -33,7 +33,9 @@ Map<String, Map<String, dynamic>> _assertSnapshot(
     for (final entry in entries) entry['id'] as String: entry,
   };
   if (required.length != entries.length) {
-    throw StateError('Vault changed while preparing key rotation. Sync and try again.');
+    throw StateError(
+      'Vault changed while preparing key rotation. Sync and try again.',
+    );
   }
   for (final raw in required) {
     final row = Map<String, dynamic>.from(raw as Map);
@@ -41,7 +43,9 @@ Map<String, Map<String, dynamic>> _assertSnapshot(
     if (entry == null ||
         entry['version'] != row['version'] ||
         (entry['deleted'] == true) != (row['deleted'] == true)) {
-      throw StateError('Vault changed while preparing key rotation. Sync and try again.');
+      throw StateError(
+        'Vault changed while preparing key rotation. Sync and try again.',
+      );
     }
   }
   return byId;
@@ -153,7 +157,8 @@ Future<PersonalRotationResult> rotatePersonalVault({
             .map((row) => Map<String, dynamic>.from(row as Map))
             .where((row) => row['id'] == vaultId)
             .firstOrNull;
-        if (current != null && current['key_version'] == currentKeyVersion + 1) {
+        if (current != null &&
+            current['key_version'] == currentKeyVersion + 1) {
           return PersonalRotationResult(
             vaultKey: candidate,
             keyVersion: current['key_version'] as int,
