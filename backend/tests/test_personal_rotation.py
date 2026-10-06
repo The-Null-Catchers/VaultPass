@@ -187,9 +187,7 @@ def test_personal_rotation_api_rotates_and_enforces_epoch(client):
     )
     assert start.status_code == 201, start.text
     assert start.json()["new_key_version"] == 2
-    assert start.json()["required_items"] == [
-        {"id": str(item_id), "version": 1, "deleted": False}
-    ]
+    assert start.json()["required_items"] == [{"id": str(item_id), "version": 1, "deleted": False}]
 
     listed = client.get(f"/vaults/{vault_id}/rotations", headers=auth)
     assert listed.status_code == 200
