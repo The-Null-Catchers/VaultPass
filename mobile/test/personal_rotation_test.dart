@@ -8,9 +8,7 @@ void main() {
   test(
     'rotation stages every next-revision ciphertext and returns new key',
     () async {
-      final accountKey = Uint8List.fromList(
-        List<int>.generate(32, (i) => i),
-      );
+      final accountKey = Uint8List.fromList(List<int>.generate(32, (i) => i));
       final candidate = Uint8List.fromList(List<int>.filled(32, 7));
       final calls = <Map<String, dynamic>>[];
       final entries = [
@@ -222,11 +220,7 @@ void main() {
       if (path.endsWith('/finalize')) throw StateError('server failed');
       if (path == '/vaults') {
         return [
-          {
-            'id': 'vault',
-            'key_version': 1,
-            'wrapped_key': <String, dynamic>{},
-          },
+          {'id': 'vault', 'key_version': 1, 'wrapped_key': <String, dynamic>{}},
         ];
       }
       fail('Unexpected request $method $path');
