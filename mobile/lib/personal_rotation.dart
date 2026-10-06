@@ -4,11 +4,8 @@ import 'package:uuid/uuid.dart';
 
 import 'vault_crypto.dart';
 
-typedef RotationRequest = Future<dynamic> Function(
-  String path, {
-  String method,
-  Object? body,
-});
+typedef RotationRequest =
+    Future<dynamic> Function(String path, {String method, Object? body});
 
 typedef KeyFactory = Uint8List Function();
 typedef IdFactory = String Function();
@@ -57,10 +54,7 @@ Future<void> _bestEffortCancel(
   String rotationId,
 ) async {
   try {
-    await request(
-      '/vaults/$vaultId/rotations/$rotationId',
-      method: 'DELETE',
-    );
+    await request('/vaults/$vaultId/rotations/$rotationId', method: 'DELETE');
   } catch (_) {
     // Staging expiry/cancellation must never mutate the active vault key.
   }
@@ -162,7 +156,9 @@ Future<PersonalRotationResult> rotatePersonalVault({
           return PersonalRotationResult(
             vaultKey: candidate,
             keyVersion: current['key_version'] as int,
-            wrappedKey: Map<String, dynamic>.from(current['wrapped_key'] as Map),
+            wrappedKey: Map<String, dynamic>.from(
+              current['wrapped_key'] as Map,
+            ),
           );
         }
       } catch (_) {
