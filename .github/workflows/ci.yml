@@ -85,8 +85,8 @@ jobs:
       - run: flutter pub get
       - name: Show exact Dart formatter diff
         run: |
-          dart format lib/personal_rotation.dart test/personal_rotation_test.dart
-          git diff --exit-code -- lib/personal_rotation.dart test/personal_rotation_test.dart
+          dart format lib test
+          git diff --exit-code -- lib test
       - run: flutter analyze && flutter test
       - name: Build test APK and unsigned release AAB
         env:
