@@ -21,7 +21,7 @@ The authenticated owner can drive a rotation using these endpoints:
 - `DELETE /vaults/{vault_id}/rotations/{rotation_id}` cancels the staged rotation without changing the active wrapped key or active item ciphertext.
 - `POST /vaults/{vault_id}/rotations/{rotation_id}/finalize` locks the current vault state, validates every retained item/version and the key epoch, applies all staged ciphertext, purges retained revision ciphertext, updates the wrapped vault key, increments `key_version`, advances sync sequencing, and removes the staging job in one transaction.
 
-The server receives only encrypted envelopes and an account-key-wrapped vault key. It never receives the newly generated clear vault key.
+The server receives only encrypted envelopes and an account-key-wrapped vault key. It never receives the newly generated clear vault key. Backend regression coverage exercises successful cutover, cancellation, stale and missing epochs, and current-epoch writes through these public routes.
 
 ## Client rotation flow
 
