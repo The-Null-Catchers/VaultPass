@@ -20,18 +20,21 @@ class SequenceRandom implements Random {
 }
 
 void main() {
-  test('builds an eight-word passphrase with 64 bits of dictionary entropy', () {
-    final result = generatePassphrase(
-      random: SequenceRandom([0, 17, 34, 51, 68, 85, 102, 119]),
-    );
+  test(
+    'builds an eight-word passphrase with 64 bits of dictionary entropy',
+    () {
+      final result = generatePassphrase(
+        random: SequenceRandom([0, 17, 34, 51, 68, 85, 102, 119]),
+      );
 
-    expect(
-      result.passphrase,
-      'amberanchor-briskbird-cedarcloud-dawndrift-emberfield-'
-      'frostgrove-goldhill-harborisland',
-    );
-    expect(result.entropy, 64);
-  });
+      expect(
+        result.passphrase,
+        'amberanchor-briskbird-cedarcloud-dawndrift-emberfield-'
+        'frostgrove-goldhill-harborisland',
+      );
+      expect(result.entropy, 64);
+    },
+  );
 
   test('supports capitalization, custom separator, and numeric token', () {
     final result = generatePassphrase(
