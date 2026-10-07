@@ -24,21 +24,28 @@ class _GeneratorPanelState extends State<GeneratorPanel> {
   int? entropy;
 
   void generateValue() {
-    setState(() {
-      if (passphrase) {
-        final result = generatePassphrase(
-          words: words.round(),
-          separator: separator,
-          capitalize: capitalize,
-          includeNumber: includeNumber,
-        );
+    if (passphrase) {
+      final result = generatePassphrase(
+        words: words.round(),
+        separator: separator,
+        capitalize: capitalize,
+        includeNumber: includeNumber,
+      );
+      setState(() {
         generated = result.passphrase;
         entropy = result.entropy;
-      } else {
+      });
+    } else {
+      setState(() {
         generated = generatePassword(length.round());
         entropy = null;
-      }
-    });
+      });
+    }
+  }
+
+  void selectMode(bool next) {
+    setState(() => passphrase = next);
+    generateValue();
   }
 
   @override
@@ -51,10 +58,7 @@ class _GeneratorPanelState extends State<GeneratorPanel> {
           ButtonSegment(value: true, label: Text('Passphrase')),
         ],
         selected: {passphrase},
-        onSelectionChanged: (value) => setState(() {
-          passphrase = value.first;
-          generateValue();
-        }),
+        onSelectionChanged: (value) => selectMode(value.first),
       ),
       const SizedBox(height: 20),
       SelectableText(
