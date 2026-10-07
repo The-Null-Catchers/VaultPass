@@ -1,41 +1,40 @@
-import { describe, expect, it, vi } from "vitest";
+import test from "node:test";
+import assert from "node:assert/strict";
 
-import * as cryptoModule from "./crypto";
 import { generatePassphrase } from "./generator";
 
-describe("generatePassphrase", () => {
-  it("builds a deterministic eight-word passphrase from uniform byte choices", () => {
-    const sequence = [0, 17, 34, 51, 68, 85, 102, 119];
-    let index = 0;
-    vi.spyOn(cryptoModule, "bytes").mockImplementation(() => new Uint8Array([sequence[index++]]));
+test("builds a deterministic eight-word passphrase from uniform byte choices", () => {
+  const sequence = [0, 17, 34, 51, 68, 85, 102, 119];
+  let index = 0;
+  const result = generatePassphrase({}, () => sequence[index++]);
 
-    const result = generatePassphrase();
+  assert.equal(result.passphrase.split("-").length, 8);
+  assert.equal(result.entropy, 64);
+  assert.equal(
+    result.passphrase,
+    "amberanchor-briskbird-cedarcloud-dawndrift-emberfield-frostgrove-goldhill-harborisland",
+  );
+});
 
-    expect(result.passphrase.split("-")).toHaveLength(8);
-    expect(result.entropy).toBe(64);
-    expect(result.passphrase).toBe(
-      "amberanchor-briskbird-cedarcloud-dawndrift-emberfield-frostgrove-goldhill-harborisland",
-    );
-  });
-
-  it("supports capitalization, separators, and an optional numeric token", () => {
-    vi.spyOn(cryptoModule, "bytes").mockImplementation(() => new Uint8Array([0]));
-
-    const result = generatePassphrase({
+test("supports capitalization, separators, and an optional numeric token", () => {
+  const result = generatePassphrase(
+    {
       words: 6,
       separator: ".",
       capitalize: true,
       includeNumber: true,
-    });
+    },
+    () => 0,
+  );
 
-    expect(result.passphrase).toBe(
-      "Amberanchor.Amberanchor.Amberanchor.Amberanchor.Amberanchor.Amberanchor.00",
-    );
-    expect(result.entropy).toBe(54);
-  });
+  assert.equal(
+    result.passphrase,
+    "Amberanchor.Amberanchor.Amberanchor.Amberanchor.Amberanchor.Amberanchor.00",
+  );
+  assert.equal(result.entropy, 54);
+});
 
-  it("rejects unsafe word counts and separators", () => {
-    expect(() => generatePassphrase({ words: 5 })).toThrow("Choose 6–12 words");
-    expect(() => generatePassphrase({ separator: "/" as "-" })).toThrow("Unsupported separator");
-  });
+test("rejects unsafe word counts and separators", () => {
+  assert.throws(() => generatePassphrase({ words: 5 }), /Choose 6–12 words/);
+  assert.throws(() => generatePassphrase({ separator: "/" as "-" }), /Unsupported separator/);
 });
