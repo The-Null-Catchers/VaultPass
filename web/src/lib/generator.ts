@@ -79,19 +79,22 @@ function passphraseWord(index: number): string {
   return `${passphraseLeft[index >> 4]}${passphraseRight[index & 15]}`;
 }
 
-export function generatePassphrase({
-  words = 8,
-  separator = "-",
-  capitalize = false,
-  includeNumber = false,
-}: PassphraseOptions = {}) {
+export function generatePassphrase(
+  {
+    words = 8,
+    separator = "-",
+    capitalize = false,
+    includeNumber = false,
+  }: PassphraseOptions = {},
+  chooseIndex: (size: number) => number = randomIndex,
+) {
   if (!Number.isInteger(words) || words < 6 || words > 12) throw new Error("Choose 6–12 words");
   if (!["-", ".", "_", " "].includes(separator)) throw new Error("Unsupported separator");
 
-  const selected = Array.from({ length: words }, () => passphraseWord(randomIndex(256))).map((word) =>
+  const selected = Array.from({ length: words }, () => passphraseWord(chooseIndex(256))).map((word) =>
     capitalize ? word[0].toUpperCase() + word.slice(1) : word,
   );
-  if (includeNumber) selected.push(String(randomIndex(100)).padStart(2, "0"));
+  if (includeNumber) selected.push(String(chooseIndex(100)).padStart(2, "0"));
 
   const entropy = words * 8 + (includeNumber ? Math.log2(100) : 0);
   return {
