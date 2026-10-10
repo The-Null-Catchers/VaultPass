@@ -171,18 +171,20 @@ export async function createRecovery(accountKey: Uint8Array, id: string) {
   }
 }
 export async function unlockRecovery(value: string, id: string, envelope: Envelope) {
-  const root = recoveryBytes(value),
-    wrap = await hkdf(root, "recovery-wrap"),
-    auth = await hkdf(root, "recovery-auth");
+  const root = recoveryBytes(value);
+  let wrap: Uint8Array | undefined;
+  let auth: Uint8Array | undefined;
   try {
+    wrap = await hkdf(root, "recovery-wrap");
+    auth = await hkdf(root, "recovery-auth");
     return {
       accountKey: await open(wrap, envelope, context("recovery", id)),
       recoveryAuth: hex(auth),
     };
   } finally {
     root.fill(0);
-    wrap.fill(0);
-    auth.fill(0);
+    wrap?.fill(0);
+    auth?.fill(0);
   }
 }
 export async function encryptJSON(key: Uint8Array, value: unknown, aad: string) {
