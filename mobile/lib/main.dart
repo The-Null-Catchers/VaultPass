@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'vault_crypto.dart';
 import 'vault_store.dart';
 import 'team_vault_panel.dart';
+import 'generator_panel.dart';
 import 'security_notifications_tile.dart';
 
 void main() {
@@ -345,8 +346,6 @@ class VaultHome extends StatefulWidget {
 class _VaultHomeState extends State<VaultHome> {
   String section = 'All items', query = '', message = '';
   bool busy = false;
-  String generated = generatePassword();
-  double length = 24;
   VaultStore get store => widget.store;
   final sections = {
     'All items': Icons.shield_outlined,
@@ -665,36 +664,7 @@ class _VaultHomeState extends State<VaultHome> {
                   if (section == 'Teams') ...[
                     TeamVaultPanel(store: store),
                   ] else if (section == 'Generator') ...[
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: SelectableText(
-                          generated,
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 22,
-                          ),
-                        ),
-                      ),
-                    ),
-                    Text('Length: ${length.round()}'),
-                    Slider(
-                      value: length,
-                      min: 12,
-                      max: 128,
-                      divisions: 116,
-                      onChanged: (v) => setState(() => length = v),
-                    ),
-                    FilledButton(
-                      onPressed: () => setState(
-                        () => generated = generatePassword(length.round()),
-                      ),
-                      child: const Text('Generate password'),
-                    ),
-                    OutlinedButton(
-                      onPressed: () => copy(generated),
-                      child: const Text('Copy password'),
-                    ),
+                    SizedBox(height: 580, child: GeneratorPanel(copy: copy)),
                   ] else if (section == 'Settings') ...[
                     SwitchListTile(
                       title: const Text('Dark appearance'),
