@@ -245,14 +245,15 @@ def current_team_ciphertext_bytes(db: Session, team_id: uuid.UUID) -> int:
 def revision_eviction_credit(db: Session, item_id: uuid.UUID, *, team: bool = False) -> int:
     """Credit the oldest ciphertext when a new revision displaces revision 21."""
     revision = TeamRevision if team else Revision
-    oldest = db.scalar(
-        select(revision.payload)
-        .where(revision.item_id == item_id)
-        .order_by(revision.version.asc())
-        .offset(19)
-        .limit(1)
+    retained = list(
+        db.scalars(
+            select(revision.payload)
+            .where(revision.item_id == item_id)
+            .order_by(revision.version.asc())
+            .limit(20)
+        )
     )
-    return ciphertext_bytes(oldest) if oldest is not None else 0
+    return ciphertext_bytes(retained[0]) if len(retained) == 20 else 0
 
 
 def credential_descriptor(row: PasskeyCredential) -> PublicKeyCredentialDescriptor:
