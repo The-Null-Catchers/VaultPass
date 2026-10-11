@@ -213,6 +213,13 @@ def current_vault_ciphertext_bytes(db: Session, vault_id: uuid.UUID) -> int:
                 Item.purged.is_(False),
             )
         )
+    ) + sum(
+        ciphertext_bytes(payload)
+        for payload in db.scalars(
+            select(Revision.payload).join(Item, Revision.item_id == Item.id).where(
+                Item.vault_id == vault_id
+            )
+        )
     )
 
 
@@ -225,7 +232,27 @@ def current_team_ciphertext_bytes(db: Session, team_id: uuid.UUID) -> int:
                 TeamItem.purged.is_(False),
             )
         )
+    ) + sum(
+        ciphertext_bytes(payload)
+        for payload in db.scalars(
+            select(TeamRevision.payload).join(
+                TeamItem, TeamRevision.item_id == TeamItem.id
+            ).where(TeamItem.team_id == team_id)
+        )
     )
+
+
+def revision_eviction_credit(db: Session, item_id: uuid.UUID, *, team: bool = False) -> int:
+    """Credit the oldest ciphertext when a new revision displaces revision 21."""
+    revision = TeamRevision if team else Revision
+    oldest = db.scalar(
+        select(revision.payload)
+        .where(revision.item_id == item_id)
+        .order_by(revision.version.asc())
+        .offset(19)
+        .limit(1)
+    )
+    return ciphertext_bytes(oldest) if oldest is not None else 0
 
 
 def credential_descriptor(row: PasskeyCredential) -> PublicKeyCredentialDescriptor:
@@ -910,6 +937,8 @@ def write(vault_id: uuid.UUID, item_id: uuid.UUID, body: s.Write, db: DB, device
     projected_bytes = current_vault_ciphertext_bytes(db, vault.id)
     projected_bytes -= existing_bytes
     projected_bytes += incoming_bytes
+    if item:
+        projected_bytes += existing_bytes - revision_eviction_credit(db, item.id)
     if projected_bytes > settings.max_vault_ciphertext_bytes:
         raise HTTPException(409, "Vault ciphertext quota reached")
     if item is None:
@@ -1589,6 +1618,8 @@ def write_team_item(
     projected_bytes = current_team_ciphertext_bytes(db, team.id)
     projected_bytes -= existing_bytes
     projected_bytes += incoming_bytes
+    if item:
+        projected_bytes += existing_bytes - revision_eviction_credit(db, item.id, team=True)
     if projected_bytes > settings.max_vault_ciphertext_bytes:
         raise HTTPException(409, "Team vault ciphertext quota reached")
     if item is None:
