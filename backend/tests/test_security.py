@@ -809,6 +809,11 @@ def test_redis_limit_and_fail_closed():
         key = redis.pipeline.return_value.__enter__.return_value.incr.call_args.args[0]
         assert "victim@example.com" not in key
         assert key.startswith("limit:account:")
+        # Redis EXPIRE NX sets a TTL only on the first increment.
+        # Further requests must not extend the expiration window.
+        redis.pipeline.return_value.__enter__.return_value.expire.assert_called_with(
+            key, 120, nx=True
+        )
 
         redis.pipeline.side_effect = ConnectionError("unavailable")
         with pytest.raises(HTTPException) as exc:
