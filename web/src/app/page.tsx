@@ -11,6 +11,7 @@ import { totp } from "../lib/totp";
 import { authenticatePasskey, createPasskey } from "../lib/passkeys";
 import type { AuthenticationOptions, RegistrationOptions } from "../lib/passkeys";
 import { TeamsPanel } from "../components/TeamsPanel";
+import { GeneratorPanel } from "../components/GeneratorPanel";
 type Data = {
   title: string;
   type: string;
@@ -138,9 +139,6 @@ export default function Home() {
     [tick, setTick] = useState(0);
   const [devices, setDevices] = useState<Device[]>([]),
     [events, setEvents] = useState<Event[]>([]),
-    [length, setLength] = useState(24),
-    [symbols, setSymbols] = useState(true),
-    [generated, setGenerated] = useState(""),
     [authConfirm, setAuthConfirm] = useState(""),
     [newMaster, setNewMaster] = useState(""),
     [verifyToken, setVerifyToken] = useState(""),
@@ -395,7 +393,6 @@ export default function Home() {
     setSelected(null);
     setEditing(false);
     setShow(false);
-    if (name === "Generator") setGenerated(generate(length, symbols).password);
     if (name === "Sharing")
       void run(async () => {
         setShares(await api<Shared[]>("/shares"));
@@ -663,29 +660,7 @@ export default function Home() {
           {section === "Teams" ? (
             <TeamsPanel getAccountKey={() => accountKey.current!} userId={session.user_id} notify={notify} />
           ) : section === "Generator" ? (
-            <section className="panel tool-panel">
-              <div className="icon-box">
-                <WandSparkles />
-              </div>
-              <h2>A stronger password starts here.</h2>
-              <p>Generated locally with cryptographically secure randomness.</p>
-              <output className="generated">{generated}</output>
-              <label>
-                Length · {length}
-                <input type="range" min="12" max="128" value={length} onChange={(e) => setLength(+e.target.value)} />
-              </label>
-              <label className="check">
-                <input type="checkbox" checked={symbols} onChange={(e) => setSymbols(e.target.checked)} />
-                Include symbols
-              </label>
-              <div className="actions">
-                <button className="primary" onClick={() => setGenerated(generate(length, symbols).password)}>
-                  Generate password
-                </button>
-                <button onClick={() => void copy(generated)}>Copy password</button>
-              </div>
-              <small>Ambiguous characters excluded. Length and random generation help; no strength estimate guarantees security.</small>
-            </section>
+            <GeneratorPanel copy={copy} />
           ) : section === "Security" ? (
             <>
               <div className="stats">
