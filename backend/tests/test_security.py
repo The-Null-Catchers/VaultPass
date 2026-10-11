@@ -314,7 +314,10 @@ def test_resource_caps_preserve_existing_access(client):
         assert rejected.status_code == 409
         assert rejected.json()["detail"] == "Vault ciphertext quota reached"
         assert client.get(first_path + "/history", headers=quota_auth).status_code == 200
-        assert client.get(f"/vaults/{quota_body['vault_id']}/sync", headers=quota_auth).status_code == 200
+        assert (
+            client.get(f"/vaults/{quota_body['vault_id']}/sync", headers=quota_auth).status_code
+            == 200
+        )
         # A revision consumes additional ciphertext quota; reads remain available.
         assert (
             client.put(
