@@ -27,7 +27,8 @@ def increment_limit(key: str, limit: int):
     try:
         with redis.pipeline() as pipe:
             pipe.incr(key)
-            pipe.expire(key, 120)
+            # Preserve the original TTL; repeated requests must not extend it.
+            pipe.expire(key, 120, nx=True)
             count, _ = pipe.execute()
         if count > limit:
             raise HTTPException(429, "Too many requests", headers={"Retry-After": "60"})
