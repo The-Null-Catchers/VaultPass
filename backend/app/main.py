@@ -216,9 +216,9 @@ def current_vault_ciphertext_bytes(db: Session, vault_id: uuid.UUID) -> int:
     ) + sum(
         ciphertext_bytes(payload)
         for payload in db.scalars(
-            select(Revision.payload).join(Item, Revision.item_id == Item.id).where(
-                Item.vault_id == vault_id
-            )
+            select(Revision.payload)
+            .join(Item, Revision.item_id == Item.id)
+            .where(Item.vault_id == vault_id)
         )
     )
 
@@ -235,9 +235,9 @@ def current_team_ciphertext_bytes(db: Session, team_id: uuid.UUID) -> int:
     ) + sum(
         ciphertext_bytes(payload)
         for payload in db.scalars(
-            select(TeamRevision.payload).join(
-                TeamItem, TeamRevision.item_id == TeamItem.id
-            ).where(TeamItem.team_id == team_id)
+            select(TeamRevision.payload)
+            .join(TeamItem, TeamRevision.item_id == TeamItem.id)
+            .where(TeamItem.team_id == team_id)
         )
     )
 
