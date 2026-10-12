@@ -823,7 +823,6 @@ def test_account_rate_limit_normalizes_identifier_before_hashing():
         assert "victim@example.com" not in keys[0]
 
 
-
 def test_account_rate_limit_uses_new_counter_after_minute_boundary():
     with patch("app.security.redis") as redis, patch("app.security.now") as clock:
         pipe = redis.pipeline.return_value.__enter__.return_value
