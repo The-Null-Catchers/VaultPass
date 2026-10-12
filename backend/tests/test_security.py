@@ -809,6 +809,21 @@ def test_redis_rate_limit_threshold_and_window_ttl():
         assert exc.value.headers == {"Retry-After": "60"}
 
 
+
+def test_account_rate_limit_normalizes_identifier_before_hashing():
+    with patch("app.security.redis") as redis, patch("app.security.now", return_value=120):
+        pipe = redis.pipeline.return_value.__enter__.return_value
+        pipe.execute.return_value = [1, True]
+        account_rate_limit(" Victim@Example.com ")
+        account_rate_limit("victim@example.com")
+
+        keys = [call.args[0] for call in pipe.incr.call_args_list]
+        assert len(keys) == 2
+        assert keys[0] == keys[1]
+        assert keys[0].startswith("limit:account:")
+        assert "victim@example.com" not in keys[0]
+
+
 def test_redis_limit_and_fail_closed():
     import pytest
     from redis.exceptions import ConnectionError
