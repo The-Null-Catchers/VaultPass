@@ -8,7 +8,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app.security import account_rate_limit, rate_limit
+from app.security import account_rate_limit, increment_limit, rate_limit
 
 
 def envelope():
@@ -791,6 +791,22 @@ def test_trash_purge_tombstone_and_account_deletion(client):
         == 200
     )
     assert client.get("/vaults", headers=auth).status_code == 401
+
+
+def test_redis_rate_limit_threshold_and_window_ttl():
+    import pytest
+
+    with patch("app.security.redis") as redis:
+        pipe = redis.pipeline.return_value.__enter__.return_value
+        pipe.execute.return_value = [5, True]
+        increment_limit("limit:peer:example:1", 5)
+        pipe.expire.assert_called_with("limit:peer:example:1", 120, nx=True)
+
+        pipe.execute.return_value = [6, False]
+        with pytest.raises(HTTPException) as exc:
+            increment_limit("limit:peer:example:1", 5)
+        assert exc.value.status_code == 429
+        assert exc.value.headers == {"Retry-After": "60"}
 
 
 def test_redis_limit_and_fail_closed():
