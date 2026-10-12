@@ -808,6 +808,7 @@ def test_redis_rate_limit_threshold_and_window_ttl():
         assert exc.value.status_code == 429
         assert exc.value.headers == {"Retry-After": "60"}
 
+
 def test_account_rate_limit_normalizes_identifier_before_hashing():
     with patch("app.security.redis") as redis, patch("app.security.now", return_value=120):
         pipe = redis.pipeline.return_value.__enter__.return_value
