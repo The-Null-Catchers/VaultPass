@@ -793,7 +793,6 @@ def test_trash_purge_tombstone_and_account_deletion(client):
     assert client.get("/vaults", headers=auth).status_code == 401
 
 
-
 def test_redis_rate_limit_threshold_and_window_ttl():
     import pytest
 
