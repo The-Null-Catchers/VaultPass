@@ -42,6 +42,24 @@ jobs:
         env:
           DATABASE_URL: postgresql+psycopg://vaultpass:ci-test-only@localhost:5432/vaultpass
         run: alembic upgrade head && alembic check && alembic downgrade base && alembic upgrade head
+      - name: PostgreSQL logical backup and isolated restore drill
+        run: |
+          docker run --rm --network host \
+            -e PGPASSWORD=ci-test-only \
+            postgres:17-alpine sh -euc '
+              export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=vaultpass
+              pg_dump --format=custom --file=/tmp/vaultpass.dump vaultpass
+              createdb vaultpass_restore_ci
+              pg_restore --exit-on-error --no-owner --dbname=vaultpass_restore_ci /tmp/vaultpass.dump
+              source_revision=$(psql -At -d vaultpass -c "SELECT version_num FROM alembic_version")
+              restored_revision=$(psql -At -d vaultpass_restore_ci -c "SELECT version_num FROM alembic_version")
+              test -n "$source_revision"
+              test "$source_revision" = "$restored_revision"
+              source_tables=$(psql -At -d vaultpass -c "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname = current_schema()")
+              restored_tables=$(psql -At -d vaultpass_restore_ci -c "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname = current_schema()")
+              test "$source_tables" = "$restored_tables"
+              dropdb vaultpass_restore_ci
+            '
       - run: pip-audit -r requirements.lock
   web:
     runs-on: ubuntu-latest
