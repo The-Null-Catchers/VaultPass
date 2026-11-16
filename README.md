@@ -68,8 +68,9 @@ Android cleartext transport is enabled only in debug builds. Release clients rej
 ```bash
 python3.12 -m venv .venv
 . .venv/bin/activate
-pip install -r backend/requirements.lock
-pip install -e 'backend[dev]'
+pip install -r backend/requirements-dev.lock
+pip install --no-deps -e 'backend[dev]'
+pip check
 cd backend
 # Set DATABASE_URL and REDIS_URL to running local PostgreSQL/Redis instances.
 alembic upgrade head
@@ -95,6 +96,7 @@ ruff check app tests
 ruff format --check app tests
 mypy app
 pip-audit -r requirements.lock
+pip-audit -r requirements-dev.lock
 alembic upgrade head
 alembic check
 
