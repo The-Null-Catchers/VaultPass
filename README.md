@@ -155,3 +155,10 @@ Import [the fake JSON template](docs/import-template.json) from web Settings. Ev
 ## Security reporting
 
 See [SECURITY.md](SECURITY.md). A compromised web delivery server or endpoint can steal secrets after unlock; zero-knowledge database storage cannot prevent malicious JavaScript delivery, OS malware, clipboard observers, or a recipient retaining a shared copy.
+
+## Reproducible Flutter toolchain
+
+CI uses Flutter 3.47.7, the SDK from the last verified successful mobile
+run. Keep checks and release builds on that same version. Upgrade the SDK in a
+separate change with analyzer/tests and Android/iOS build validation; following
+the moving `stable` channel can introduce new diagnostics without a source change.
