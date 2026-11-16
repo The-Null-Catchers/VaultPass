@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-      - run: pip install -r requirements.lock && pip install -e '.[dev]'
+      - run: pip install -r requirements-dev.lock && pip install --no-deps -e '.[dev]' && pip check
       - run: ruff check app tests && ruff format --check app tests && mypy app
       - run: pytest -q
       - name: PostgreSQL migration validation
@@ -61,6 +61,7 @@ jobs:
               dropdb vaultpass_restore_ci
             '
       - run: pip-audit -r requirements.lock
+      - run: pip-audit -r requirements-dev.lock
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -77,8 +78,8 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-          cache-dependency-path: backend/requirements.lock
-      - run: pip install -r ../backend/requirements.lock
+          cache-dependency-path: backend/requirements-dev.lock
+      - run: pip install -r ../backend/requirements-dev.lock
       - run: npm ci
       - run: npm run lint && npm run typecheck && npm test && npm run build
       - run: npx playwright install --with-deps chromium
@@ -99,6 +100,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.7'
           cache: true
       - run: flutter pub get
       - run: dart format --output=none --set-exit-if-changed lib test
