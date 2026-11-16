@@ -42,6 +42,10 @@ Cross-client interoperability, encrypted backup restore, mobile offline-queue te
 - Member removal uses bounded staged uploads followed by an atomic finalize that increments the key epoch, requires a fresh wrapper for every remaining member and current ciphertext for every retained item, removes old revision ciphertext and invalidates outstanding invitations.
 - The supplied Nginx deployment snippets enforce a trusted-edge `/api/` request limit, per-client connection cap, 400 KiB request-size cap, bounded request/proxy timeouts, and overwrite forwarded client-address headers with the edge-observed peer address.
 
+## Automated PostgreSQL restore drill
+
+The backend CI now runs a PostgreSQL 17 logical dump of the migrated **CI test database** and restores it into a separate temporary database using the matching PostgreSQL 17 client. It compares the Alembic revision and public-table counts after restoration. The dump is local to the ephemeral CI container and is discarded; no production secrets or backups are used. This validates schema-level dump/restore mechanics, **not** recovery of real encrypted vault data, production backup encryption, point-in-time recovery, remote storage, or recovery-time objectives. Those must be independently tested and evidenced before release.
+
 ## Remaining implementation and release gates
 
 1. Independent cryptographic/security review; full threat-driven penetration testing; physical Android/iOS key invalidation/biometric/background/clipboard tests and iOS Keychain behavior.
