@@ -1,0 +1,70 @@
+{
+  "repository": "The-Null-Catchers/VaultPass",
+  "defaultBranch": "main",
+  "baseSHA": "7136f79457d4dbc47f1ef5d74749955d1228daf4",
+  "backupTag": "cleanup-backup-2026-11-16",
+  "delete": [
+    {
+      "name": "feature/mobile-team-self-leave-20261001",
+      "sha": "209f24a91e829abb0b1eeed06608e973434091ac",
+      "reason": "ancestor"
+    },
+    {
+      "name": "feature/mobile-team-vault-20260930",
+      "sha": "f45fae046f9e2833a857bc04c37488837de834a0",
+      "reason": "ancestor"
+    },
+    {
+      "name": "security/mobile-personal-vault-key-rotation-20261006",
+      "sha": "cb85aa5a338817343bfb917f6bcc43e8d1e95cc5",
+      "reason": "ancestor"
+    },
+    {
+      "name": "security/personal-vault-key-rotation-20261005",
+      "sha": "47adc0d1c9345b71d3fd8b0e619401fac3c5049a",
+      "reason": "ancestor"
+    },
+    {
+      "name": "security/personal-vault-key-rotation-api-20261006",
+      "sha": "cae27a5609825bd011b6b5183352e59ba93c32b9",
+      "reason": "ancestor"
+    },
+    {
+      "name": "security/web-personal-vault-key-rotation-20261006",
+      "sha": "2f0217810ec420769f2b240fe834851b57ba81c6",
+      "reason": "ancestor"
+    },
+    {
+      "name": "security/web-personal-vault-key-rotation-final-20261006",
+      "sha": "2f0217810ec420769f2b240fe834851b57ba81c6",
+      "reason": "ancestor"
+    },
+    {
+      "name": "docs/passphrase-release-readiness",
+      "sha": "65621be4917947fcaa713c7335609de2097e21a8",
+      "reason": "equivalent"
+    },
+    {
+      "name": "fix/recovery-key-cleanup-on-derivation-failure",
+      "sha": "5c470844a61bbcca88872a60e9bb9a4a94bd663b",
+      "reason": "equivalent"
+    },
+    {
+      "name": "security/next-16.3.6-20260930",
+      "sha": "ae75830b89df3c2451b8d852429921ecfb0ef99e",
+      "reason": "equivalent"
+    }
+  ],
+  "status": "Explicitly approved: archive before lease-guarded deletion",
+  "archiveParents": [
+    "209f24a91e829abb0b1eeed06608e973434091ac",
+    "f45fae046f9e2833a857bc04c37488837de834a0",
+    "cb85aa5a338817343bfb917f6bcc43e8d1e95cc5",
+    "47adc0d1c9345b71d3fd8b0e619401fac3c5049a",
+    "cae27a5609825bd011b6b5183352e59ba93c32b9",
+    "2f0217810ec420769f2b240fe834851b57ba81c6",
+    "65621be4917947fcaa713c7335609de2097e21a8",
+    "5c470844a61bbcca88872a60e9bb9a4a94bd663b",
+    "ae75830b89df3c2451b8d852429921ecfb0ef99e"
+  ]
+}
