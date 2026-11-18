@@ -162,3 +162,7 @@ CI uses Flutter 3.47.7, the SDK from the last verified successful mobile
 run. Keep checks and release builds on that same version. Upgrade the SDK in a
 separate change with analyzer/tests and Android/iOS build validation; following
 the moving `stable` channel can introduce new diagnostics without a source change.
+
+## Portfolio roadmap
+
+See the [repository-specific portfolio roadmap](PORTFOLIO_ROADMAP.md) for priorities, acceptance criteria, demo scope, and release evidence. This complements the existing implementation and status documentation.
