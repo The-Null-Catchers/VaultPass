@@ -1,44 +1,52 @@
-# VaultPass — خطة البورتفيليو
+# VaultPass portfolio roadmap
 
-مرجع التقييم الأساسي: 17 نوفمبر 2026. تحديث نشر الخطة داخل المستودع: 18 نوفمبر 2026.
+Baseline reviewed on November 17, 2026. Repository roadmap published on November 18, 2026.
 
-الخطة خاصة بهذا المستودع، ومستخلصة من خطة Null Catchers المشتركة. وصف «الموجود الموثق» يعكس المراجعة بتاريخها؛ تحقّق من الكود ووثائق الحالة الحالية قبل إنشاء مهمة جديدة. لا تعِد تنفيذ ميزة موجودة، ولا تعتبر وجود تعريف CI دليلًا على نجاح تشغيله.
+This roadmap applies to this repository and follows the shared Null Catchers portfolio plan. Verify the documented state against the current code and runs before starting work.
 
-**تقدير شريحة العرض الأولى:** 35–60 ساعة، دون التدقيق الخارجي. التقدير تخطيطي لمطور يعرف المشروع، ويستثني انتظار حسابات المتاجر والمراجعات الخارجية وتجهيز بيئة الهدف. لا يغطي جميع بنود P2.
+**Estimated initial demo effort** 35–60 hours for a developer familiar with the project. The estimate excludes external reviews, store accounts, target environment setup, and later milestones.
 
-## الأولويات الخاصة بالمشروع
+## Project priorities
 
-**الموجود الموثق:** personal vault حقيقي وتشفير محلي وsync ciphertext وteam protocol وويب مع جزء من mobile parity. RELEASE_READINESS يصرح بأنه pre-release وغير مدقق استقلاليًا؛ لا تحول هذا الوصف إلى «آمن للإنتاج» بمجرد CI أخضر.
+**Documented state** The personal vault implements local encryption, ciphertext synchronization, team protocols, and partial web and mobile parity. Release readiness describes the project as pre-release with independent validation outstanding.
 
-**P0 — نسخة العرض:** استخدم أسرارًا اصطناعية فقط. سجل create/edit → lock/unlock → جهاز ثانٍ → conflict محفوظ → backup/restore محلي. وضّح في README والديمو ما لا يراه الخادم وما يبقى metadata، وحدود recovery والنسخ القديمة وسحب المشاركة.
+**P0 — Demo** Use synthetic secrets to demonstrate lock and unlock, two-client synchronization, conflicts, and encrypted backup and restore. Document visible server metadata, recovery, old copies, and sharing revocation.
 
-**P1 — إغلاق شريحة فريق:** اختبر web team invitation/read-only/member removal/rekey في متصفحين، مع منع عضو مزال من قراءة ciphertext الجديدة. اختبر على هاتف حقيقي إبطال biometric key وتبديل الحسابات والخلفية والـclipboard؛ التوثيق الحالي يقر بأن هذه ليست مثبتة بمجرد نجاح builds.
+**P1 — Validation and depth** Use two browsers to test invitation, read-only access, member removal, and rekeying. Verify removed members cannot read new ciphertext. Check biometric invalidation, account switching, backgrounding, and clipboard behavior on a physical phone.
 
-**P2 — لاحقًا:** mobile membership administration ومراجعة تشفير مستقلة وpenetration testing قبل التعامل مع أسرار حقيقية أو توسيع ادعاءات الأمان. pinning أو تغيير البروتوكول ليس تحسينًا تلقائيًا بلا threat model.
+**P2 — Later** Consider mobile membership administration and independent cryptography review and security testing before expanding security claims or using real secrets. Assess pinning and protocol changes against the threat model.
 
-**معيار الإنجاز:** لا plaintext في API/logs عند فحص الرحلة، الاختلافات والتعارضات لا تضيع، test vectors مشتركة بين الويب والموبايل، والقيود الأمنية ظاهرة للمراجع. التحقق المستقل بوابة منفصلة لا أدعي إنجازها بهذه الخطة.
+**Acceptance criteria** Check API traffic and logs for plaintext, retain conflicts, share cross-client test vectors, and state security limits. Track independent validation separately.
 
-**الديمو:** خزنة اصطناعية → ciphertext في طلب الشبكة → مزامنة → إزالة عضو وإعادة مفاتيح → conflict/restore. **الأدلة:** [Release Readiness](https://github.com/The-Null-Catchers/VaultPass/blob/main/docs/RELEASE_READINESS.md)، [Threat Model](https://github.com/The-Null-Catchers/VaultPass/blob/main/docs/THREAT_MODEL.md).
+**Demo scenario** Synthetic vault → inspect ciphertext → sync → remove a member and rekey → resolve conflict and restore. [Release Readiness](https://github.com/The-Null-Catchers/VaultPass/blob/main/docs/RELEASE_READINESS.md), [Threat Model](https://github.com/The-Null-Catchers/VaultPass/blob/main/docs/THREAT_MODEL.md).
 
-## بوابة قبول نسخة البورتفيليو
+## Next milestones
 
-- [ ] يستطيع شخص آخر تشغيل المسار الرئيسي من checkout نظيف، باتباع README، دون أسرار شخصية.
-- [ ] توجد قصة واحدة مكتملة: مستخدم محدد، مشكلة محددة، ومسار بداية إلى نتيجة محفوظة.
-- [ ] ينجح اختبار للمسار الرئيسي وحالة فشل مهمة، وتُختبر حدود الصلاحيات حيث توجد حسابات متعددة.
-- [ ] توجد بيانات عرض اصطناعية معلنة، قابلة لإعادة الإنشاء؛ ولا توجد بيانات عملاء أو أسرار في اللقطات.
-- [ ] توجد 4–6 لقطات حقيقية أو العدد الملائم للأداة، وفيديو 60–120 ثانية، وروابط تعمل. تُلتقط الأدلة من إصدار معروف.
-- [ ] README يوضح المزايا الفعلية، طريقة التشغيل، الرسم المعماري، القيود، وروابط الاختبارات والديمو.
-- [ ] Case study قصيرة تشرح قرارين هندسيين، بديلًا جرى استبعاده ولماذا، وفشلًا حقيقيًا وكيف يعالجه النظام.
-- [ ] صفحة Release تسجل SHA وCI والمتطلبات والقيود. لا تُنشر أرقام أداء دون workload وعتاد وطريقة قياس.
-- [ ] حُسمت سياسة الترخيص ونسب المساهمات قبل التوزيع؛ لا نختار ترخيصًا تلقائيًا لجميع المستودعات.
+[Release readiness](docs/RELEASE_READINESS.md) documents cross-client interoperability, restore, and key rotation. The project remains in pre-release.
 
-الديمو المستضاف مفيد وليس شرطًا لكل أداة. أدوات تنفيذ الكود وإدارة الخوادم والأسرار يمكن عرضها بفيديو وبيئة معزولة وتجربة محلية قابلة للإعادة. لا تفتح تنفيذًا عامًا غير محدود لمجرد وجود رابط بورتفيليو.
+1. [ ] Create a synthetic vault entry and test lock and unlock. Open it from a second client and check that the value matches.
+2. [ ] Edit the same item concurrently, document the conflict, and restore an encrypted backup to a separate test vault. Verify the item count and rejection of invalid decryption credentials.
+3. [ ] Record the clients, commit SHA, and verification limits, including physical biometric testing when available.
 
-## التنفيذ والمتابعة
+## Portfolio acceptance checklist
 
-- حوّل P0 إلى مهام صغيرة، لكل منها سلوك متوقع ومعيار قبول واختبار مناسب.
-- ابدأ بتأكيد الموجود؛ عدّل هذه الخطة عندما يغلق بند بدليل مرتبط بcommit أو PR.
-- سجّل مصدر بيانات الديمو، والـSHA الذي التُقطت منه الأدلة، وحدود التجربة الفعلية.
-- راجع الفرق النهائي وانتظر نجاح الفحوص المطلوبة لنفس SHA قبل الدمج، مع احترام حماية الفرع.
-- إذا كان التعديل وثائق فقط ولا يوجد فحص ينطبق عليه، سجّل التحقق من محتواها وروابطها؛ لا تسجل اختبارات تشغيل لم تُنفّذ.
-- لا تُنشر أرقام أداء أو ادعاءات أمان أو جاهزية إنتاج بلا دليل مناسب.
+- [ ] Another person can reproduce the primary workflow from a clean checkout using the README and test credentials or fixtures.
+- [ ] The demo tells one complete story with a defined user, problem, and saved result.
+- [ ] Tests cover the main flow, an important failure, and access boundaries when multiple accounts are involved.
+- [ ] Demo data is labeled synthetic and reproducible. Review screenshots and recordings for secrets and customer data.
+- [ ] Include four to six real screenshots where appropriate, a 60–120 second recording, and working links. Identify the revision used for capture.
+- [ ] The README describes implemented capabilities, setup, architecture, limits, tests, and the demo.
+- [ ] A short case study explains two engineering decisions, a considered alternative, and how the system handles an actual failure.
+- [ ] Release evidence records the commit SHA, CI, prerequisites, and limits. Performance data includes workload, hardware, and method.
+- [ ] Licensing and contributor attribution are settled before distribution. Choose the license for each repository individually.
+
+A hosted demo is optional. Code execution, server administration, and secret management can be demonstrated through a recording and a reproducible isolated environment. Keep public demo access scoped to the activities it needs.
+
+## Implementation and follow-up
+
+- Break P0 into tasks with expected behavior, acceptance criteria, and a suitable test.
+- Verify existing functionality first. Update this plan when evidence tied to a commit or PR closes a milestone.
+- Record the fixture source, the revision used for evidence, and the tested limits.
+- Review the final diff and verify required checks for its exact SHA before merging. Follow branch protection.
+- For documentation-only changes with no applicable workflow, verify content and links and record the checks actually performed.
+- Tie performance, security, and readiness claims to supporting evidence.
