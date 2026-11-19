@@ -155,9 +155,16 @@ test("encrypted backup restores into a different synthetic account and rejects w
     const picker = destination.locator('input[type="file"][accept="application/json"]');
     const upload = { name: "synthetic-encrypted-backup.json", mimeType: "application/json", buffer: Buffer.from(backupText) };
 
-    destination.once("dialog", dialog => { void dialog.accept("WRONG SYNTHETIC MASTER PASSWORD"); });
-    await picker.setInputFiles(upload);
-    await expect(destination.locator(".error[role=alert]").first()).toBeVisible({ timeout: 60_000 });
+    // Wait for the actual browser prompt: uploading a file does not wait for
+    // asynchronous File.text() parsing or the subsequent password dialog.
+    await Promise.all([
+      destination.waitForEvent("dialog", { timeout: 15_000 }).then(async dialog => {
+        expect(dialog.type()).toBe("prompt");
+        await dialog.accept("WRONG SYNTHETIC MASTER PASSWORD");
+      }),
+      picker.setInputFiles(upload),
+    ]);
+    await expect(destination.locator(".error[role=alert]").first()).toBeVisible({ timeout: 30_000 });
     await destination.getByRole("button", { name: "All items", exact: true }).click();
     await expect(destination.locator("button.item")).toHaveCount(0);
 
