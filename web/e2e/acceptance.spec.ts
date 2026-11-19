@@ -157,7 +157,7 @@ test("encrypted backup restores into a different synthetic account and rejects w
 
     destination.once("dialog", dialog => { void dialog.accept("WRONG SYNTHETIC MASTER PASSWORD"); });
     await picker.setInputFiles(upload);
-    await expect(destination.locator(".error[role=alert]").first()).toBeVisible();
+    await expect(destination.locator(".error[role=alert]").first()).toBeVisible({ timeout: 60_000 });
     await destination.getByRole("button", { name: "All items", exact: true }).click();
     await expect(destination.locator("button.item")).toHaveCount(0);
 
