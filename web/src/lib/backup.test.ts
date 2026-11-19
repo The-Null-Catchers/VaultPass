@@ -37,4 +37,36 @@ test("encrypted backup restores synthetic entries, skips deleted entries, and re
   await assert.rejects(restoreBackup({ ...backup, items: [{ ...backup.items[0], version: 0 }] }, master), /Invalid backup item/);
   await assert.rejects(restoreBackup({ ...backup, items: [{ ...backup.items[0], deleted: "yes" }] }, master), /Invalid backup item/);
   await assert.rejects(restoreBackup({ ...backup, vaults: [{ ...backup.vaults[0], id: "" }] }, master), /Invalid backup metadata/);
+
+  // Authentication binds ciphertext to the original item ID, version, and vault.
+  // A valid envelope must not decrypt after metadata is changed or ciphertext is replaced.
+  await assert.rejects(restoreBackup({
+    ...backup,
+    items: [{ ...backup.items[0], version: 2 }],
+  }, master));
+  await assert.rejects(restoreBackup({
+    ...backup,
+    items: [{ ...backup.items[0], id: crypto.randomUUID() }],
+  }, master));
+  await assert.rejects(restoreBackup({
+    ...backup,
+    items: [{
+      ...backup.items[0],
+      payload: { ...backup.items[0].payload, ciphertext: btoa("synthetic tampering") },
+    }],
+  }, master));
+  await assert.rejects(restoreBackup({
+    ...backup,
+    vaults: [{ ...backup.vaults[0], id: crypto.randomUUID() }],
+  }, master));
+
+  // Oversized and unsupported backups must fail before any expensive KDF work.
+  await assert.rejects(restoreBackup({
+    ...backup,
+    items: Array.from({ length: 5001 }, (_, index) => ({
+      ...backup.items[0],
+      id: `synthetic-${index}`,
+    })),
+  }, master), /Unsupported backup/);
+  await assert.rejects(restoreBackup({ ...backup, format: "vaultpass-backup-v2" }, master), /Unsupported backup/);
 });
